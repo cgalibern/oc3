@@ -33,7 +33,7 @@ func (a *Api) PostAuthNode(c echo.Context) error {
 
 	if err := c.Bind(&body); err != nil {
 		log.Error("PostAuthNode : invalid request body", "error", err)
-		return JSONProblemf(c, http.StatusBadRequest, "invalid request body")
+		return JSONProblem(c, http.StatusBadRequest, err.Error())
 	}
 
 	var app string
