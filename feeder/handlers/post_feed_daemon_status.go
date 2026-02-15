@@ -15,10 +15,8 @@ import (
 )
 
 func (a *Api) PostDaemonStatus(c echo.Context) error {
-	log := getLog(c).With("handler", "PostDaemonStatus")
-	nodeID := nodeIDFromContext(c)
+	nodeID, log := getNodeIDAndLogger(c, "PostDaemonStatus")
 	if nodeID == "" {
-		log.Debug("node auth problem")
 		return JSONNodeAuthProblem(c)
 	}
 
@@ -34,32 +32,34 @@ func (a *Api) PostDaemonStatus(c echo.Context) error {
 	b, err := io.ReadAll(body)
 	defer func() {
 		if err := body.Close(); err != nil {
-			log.Error("close body failed: " + err.Error())
+			log.Warn("request body Close", logError, err)
 		}
 	}()
 	if err != nil {
-		return JSONProblemf(c, http.StatusInternalServerError, "", "read request body: %s", err)
+		log.Warn("request ReadAll", logError, err)
+		return JSONProblemf(c, http.StatusBadRequest, "ReadAll: %s", err)
 	}
 	postData := &feeder.PostDaemonStatus{}
 	if err := json.Unmarshal(b, postData); err != nil {
-		log.Error(fmt.Sprintf("Unmarshal %s", err))
-		return JSONProblemf(c, http.StatusBadRequest, "BadRequest", "unexpected body: %s", err)
+		log.Debug("request Unmarshal", logError, err)
+		return JSONProblem(c, http.StatusBadRequest, err.Error())
 	} else {
 		mergeChanges(strings.Join(postData.Changes, " "))
 	}
 	if !strings.HasPrefix(postData.Version, "2.") && !strings.HasPrefix(postData.Version, "3.") {
-		log.Error(fmt.Sprintf("unexpected version %s", postData.Version))
-		return JSONProblemf(c, http.StatusBadRequest, "BadRequest", "unsupported data client version: %s", postData.Version)
+		msg := fmt.Sprintf("unexpected version %s", postData.Version)
+		log.Debug(msg)
+		return JSONProblem(c, http.StatusBadRequest, msg)
 	}
 	ctx := c.Request().Context()
-	log.Info(fmt.Sprintf("HSET %s %s", cachekeys.FeedDaemonStatusH, nodeID))
+	log.Info("HSet FeedDaemonStatusH")
 	if err := a.Redis.HSet(ctx, cachekeys.FeedDaemonStatusH, nodeID, string(b)).Err(); err != nil {
-		log.Error(fmt.Sprintf("HSET %s %s", cachekeys.FeedDaemonStatusH, nodeID))
-		return JSONProblemf(c, http.StatusInternalServerError, "redis operation", "can't HSET %s: %s", cachekeys.FeedDaemonStatusH, err)
+		log.Error("HSet FeedDaemonStatusH", logError, err)
+		return JSONError(c)
 	}
 	if len(mChange) > 0 {
 		// request contains changes, merge them to not yet applied changes
-		log.Info(fmt.Sprintf("HSET %s %s", cachekeys.FeedDaemonStatusChangesH, nodeID))
+		log.Debug("HGet FeedDaemonStatusChangesH")
 		redisChanges, err := a.Redis.HGet(ctx, cachekeys.FeedDaemonStatusChangesH, nodeID).Result()
 		switch err {
 		case nil:
@@ -68,7 +68,8 @@ func (a *Api) PostDaemonStatus(c echo.Context) error {
 		case redis.Nil:
 			// no existing changes to merge
 		default:
-			return JSONProblemf(c, http.StatusInternalServerError, "redis operation", "can't HGet %s: %s", cachekeys.FeedDaemonStatusChangesH, err)
+			log.Error("HGet FeedDaemonStatusChangesH", logError, err)
+			return JSONError(c)
 		}
 		l := make([]string, len(mChange))
 		i := 0
@@ -78,30 +79,29 @@ func (a *Api) PostDaemonStatus(c echo.Context) error {
 		}
 		mergedChanges := strings.Join(l, " ")
 		// push changes
-		log.Info(fmt.Sprintf("HSET %s[%s] with %s", cachekeys.FeedDaemonStatusChangesH, nodeID, mergedChanges))
+		log.Debug("HSet FeedDaemonStatusChangesH", logChanges, mergedChanges)
 		if err := a.Redis.HSet(ctx, cachekeys.FeedDaemonStatusChangesH, nodeID, mergedChanges).Err(); err != nil {
-			return JSONProblemf(c, http.StatusInternalServerError, "redis operation", "can't HSET %s: %s", cachekeys.FeedDaemonStatusH, err)
+			log.Error("HSet FeedDaemonStatusChangesH", logChanges, mergedChanges, logError, err)
+			return JSONError(c)
 		}
 	}
-	if err := a.pushNotPending(ctx, cachekeys.FeedDaemonStatusPendingH, cachekeys.FeedDaemonStatusQ, nodeID); err != nil {
-		log.Error(fmt.Sprintf("can't push %s %s: %s", cachekeys.FeedDaemonStatusQ, nodeID, err))
-		return JSONProblemf(c, http.StatusInternalServerError, "redis operation", "can't push %s %s: %s", cachekeys.FeedDaemonStatusQ, nodeID, err)
+	if err := a.pushNotPending(ctx, log, cachekeys.FeedDaemonStatusPendingH, cachekeys.FeedDaemonStatusQ, nodeID); err != nil {
+		log.Error("pushNotPending", logError, err)
+		return JSONError(c)
 	}
 
 	clusterID := clusterIDFromContext(c)
 	if clusterID != "" {
-		objects, err := a.getObjectConfigToFeed(ctx, clusterID)
-		if err != nil {
-			log.Error(fmt.Sprintf("%s", err))
-		} else {
-			if len(objects) > 0 {
-				if err := a.removeObjectConfigToFeed(ctx, clusterID); err != nil {
-					log.Error(fmt.Sprintf("%s", err))
-				}
-				log.Info(fmt.Sprintf("accepted %s, cluster id %s need object config: %s", nodeID, clusterID, objects))
-				return c.JSON(http.StatusAccepted, feeder.DaemonStatusAccepted{ObjectWithoutConfig: &objects})
+		if objects, err := a.getObjectConfigToFeed(ctx, clusterID); err != nil {
+			log.Warn("getObjectConfigToFeed", logError, err)
+		} else if len(objects) > 0 {
+			if err := a.removeObjectConfigToFeed(ctx, clusterID); err != nil {
+				log.Warn("removeObjectConfigToFeed", logError, err)
 			}
+			log.Info("accepted with detected missing object configs", logObjects, objects)
+			return c.JSON(http.StatusAccepted, feeder.DaemonStatusAccepted{ObjectWithoutConfig: &objects})
 		}
 	}
+	log.Info("accepted")
 	return c.JSON(http.StatusAccepted, feeder.DaemonStatusAccepted{})
 }

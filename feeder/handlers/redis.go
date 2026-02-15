@@ -36,9 +36,8 @@ func (a *Api) pushUniqValue(ctx context.Context, key string, value string) error
 //
 // It uses HGET O(1) instead of LPOS O(n).
 // LPOS requires redis 6.0.6,
-func (a *Api) pushNotPending(ctx context.Context, pendingKey, queueKey string, value string) error {
-	s := fmt.Sprintf("HGET %s %s", pendingKey, value)
-	slog.Info(s)
+func (a *Api) pushNotPending(ctx context.Context, log *slog.Logger, pendingKey, queueKey string, value string) error {
+	log.Info("pushNotPending HGet pendingKey")
 	_, err := a.Redis.HGet(ctx, pendingKey, value).Result()
 	switch err {
 	case nil:
@@ -46,18 +45,16 @@ func (a *Api) pushNotPending(ctx context.Context, pendingKey, queueKey string, v
 		return nil
 	case redis.Nil:
 		// not in try push
-		s = fmt.Sprintf("HSET %s %s %s", pendingKey, value, value)
-		slog.Info(s)
+		log.Info("pushNotPending HSet pendingKey")
 		if _, err := a.Redis.HSet(ctx, pendingKey, value, value).Result(); err != nil {
-			return fmt.Errorf("%s: %w", s, err)
+			return fmt.Errorf("Hset pendingKey: %w", err)
 		}
-		s = fmt.Sprintf("LPUSH %s %s", queueKey, value)
-		slog.Info(s)
+		log.Info("pushNotPending LPush queueKey")
 		if _, err := a.Redis.LPush(ctx, queueKey, value).Result(); err != nil {
-			return fmt.Errorf("%s: %w", s, err)
+			return fmt.Errorf("LPush queueKey: %w", err)
 		}
 		return nil
 	default:
-		return fmt.Errorf("%s: %w", s, err)
+		return fmt.Errorf("HGet pendingKey: %w", err)
 	}
 }

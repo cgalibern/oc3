@@ -9,21 +9,16 @@ import (
 	"github.com/opensvc/oc3/feeder"
 )
 
-func JSONProblemf(ctx echo.Context, code int, title, detail string, args ...any) error {
-	return JSONProblem(ctx, code, title, fmt.Sprintf(detail, args...))
+func JSONProblemf(ctx echo.Context, code int, format string, args ...any) error {
+	return JSONProblem(ctx, code, fmt.Sprintf(format, args...))
 }
 
-func JSONProblem(ctx echo.Context, code int, title, detail string) error {
-	if title == "" {
-		title = http.StatusText(code)
-	}
-	return ctx.JSON(code, feeder.Problem{
-		Detail: detail,
-		Title:  title,
-		Status: code,
-	})
+func JSONProblem(ctx echo.Context, code int, s string) error {
+	return ctx.JSON(code, feeder.Problem{Text: s})
 }
-
+func JSONError(c echo.Context) error {
+	return JSONProblem(c, http.StatusInternalServerError, "Something went wrong. Please try again later")
+}
 func JSONNodeAuthProblem(c echo.Context) error {
-	return JSONProblem(c, http.StatusForbidden, "", "expecting node credentials")
+	return JSONProblem(c, http.StatusForbidden, "expecting node credentials")
 }

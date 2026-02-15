@@ -1,7 +1,6 @@
 package feederhandlers
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 
@@ -11,30 +10,28 @@ import (
 )
 
 func (a *Api) PostSystem(c echo.Context) error {
-	log := getLog(c)
-	nodeID := nodeIDFromContext(c)
+	nodeID, log := getNodeIDAndLogger(c, "PostSystem")
 	if nodeID == "" {
 		return JSONNodeAuthProblem(c)
 	}
 
 	b, err := io.ReadAll(c.Request().Body)
 	if err != nil {
-		return JSONProblemf(c, http.StatusInternalServerError, "", "read request body: %s", err)
+		log.Warn("request ReadAll", logError, err)
+		return JSONProblemf(c, http.StatusBadRequest, "ReadAll: %s", err)
 	}
 
-	reqCtx := c.Request().Context()
+	ctx := c.Request().Context()
 
-	s := fmt.Sprintf("HSET %s %s", cachekeys.FeedSystemH, nodeID)
-	log.Info(s)
-	if _, err := a.Redis.HSet(reqCtx, cachekeys.FeedSystemH, nodeID, string(b)).Result(); err != nil {
-		s = fmt.Sprintf("%s: %s", s, err)
-		log.Error(s)
-		return JSONProblem(c, http.StatusInternalServerError, "", s)
+	log.Info("Hset FeedSystemH")
+	if _, err := a.Redis.HSet(ctx, cachekeys.FeedSystemH, nodeID, string(b)).Result(); err != nil {
+		log.Error("Hset FeedSystemH", logError, err)
+		return JSONError(c)
 	}
 
-	if err := a.pushNotPending(reqCtx, cachekeys.FeedSystemPendingH, cachekeys.FeedSystemQ, nodeID); err != nil {
-		log.Error(fmt.Sprintf("can't push %s %s: %s", cachekeys.FeedSystemQ, nodeID, err))
-		return JSONProblemf(c, http.StatusInternalServerError, "redis operation", "can't push %s %s: %s", cachekeys.FeedSystemQ, nodeID, err)
+	if err := a.pushNotPending(ctx, log, cachekeys.FeedSystemPendingH, cachekeys.FeedSystemQ, nodeID); err != nil {
+		log.Error("pushNotPending", "error", err)
+		return JSONError(c)
 	}
 
 	return c.JSON(http.StatusAccepted, nil)

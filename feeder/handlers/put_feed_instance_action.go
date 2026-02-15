@@ -27,47 +27,46 @@ import (
 
 // PutInstanceActionEnd handles PUT /feed/action
 func (a *Api) PutInstanceActionEnd(c echo.Context) error {
+	nodeID, log := getNodeIDAndLogger(c, "PutInstanceActionEnd")
+	if nodeID == "" {
+		return JSONNodeAuthProblem(c)
+	}
+
 	keyH := cachekeys.FeedInstanceActionH
 	keyQ := cachekeys.FeedInstanceActionQ
 	keyPendingH := cachekeys.FeedInstanceActionPendingH
 
-	log := getLog(c)
-
-	nodeID := nodeIDFromContext(c)
-	if nodeID == "" {
-		log.Debug("node auth problem")
-		return JSONNodeAuthProblem(c)
-	}
-
 	ClusterID := clusterIDFromContext(c)
 	if ClusterID == "" {
-		return JSONProblemf(c, http.StatusConflict, "Refused", "authenticated node doesn't define cluster id")
+		msg := "refused: authenticated node doesn't define cluster id"
+		log.Info(msg)
+		return JSONProblem(c, http.StatusConflict, msg)
 	}
 
 	var payload feeder.PutInstanceActionEndJSONRequestBody
 	if err := c.Bind(&payload); err != nil {
-		return JSONProblem(c, http.StatusBadRequest, "Failed to json decode request body", err.Error())
+		return JSONProblem(c, http.StatusBadRequest, err.Error())
 	}
 
 	b, err := json.Marshal(payload)
 	if err != nil {
-		return JSONProblem(c, http.StatusInternalServerError, "Failed to re-encode config", err.Error())
+		log.Error("Marshall", logError, err)
+		return JSONError(c)
 	}
 
-	reqCtx := c.Request().Context()
+	ctx := c.Request().Context()
 
 	idx := fmt.Sprintf("%s@%s@%s:%s", payload.Path, nodeID, ClusterID, payload.Uuid)
 
-	s := fmt.Sprintf("HSET %s %s", keyH, idx)
-	if _, err := a.Redis.HSet(reqCtx, keyH, idx, b).Result(); err != nil {
-		s = fmt.Sprintf("%s: %s", s, err)
-		log.Error(s)
-		return JSONProblem(c, http.StatusInternalServerError, "", s)
+	log.Debug("HSet keyH")
+	if _, err := a.Redis.HSet(ctx, keyH, idx, b).Result(); err != nil {
+		log.Error("HSet keyH", logError, err)
+		return JSONError(c)
 	}
 
-	if err := a.pushNotPending(reqCtx, keyPendingH, keyQ, idx); err != nil {
-		log.Error(fmt.Sprintf("can't push %s %s: %s", keyQ, idx, err))
-		return JSONProblemf(c, http.StatusInternalServerError, "redis operation", "can't push %s %s: %s", keyQ, idx, err)
+	if err := a.pushNotPending(ctx, log, keyPendingH, keyQ, idx); err != nil {
+		log.Error("pushNotPending", logError, err)
+		return JSONError(c)
 	}
 
 	log.Debug("action end accepted")

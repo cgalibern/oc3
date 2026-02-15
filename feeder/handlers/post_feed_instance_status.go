@@ -16,6 +16,11 @@ import (
 )
 
 func (a *Api) PostInstanceStatus(c echo.Context, params feeder.PostInstanceStatusParams) error {
+	nodeID, log := getNodeIDAndLogger(c, "PostInstanceStatus")
+	if nodeID == "" {
+		return JSONNodeAuthProblem(c)
+	}
+
 	var (
 		keyH        = cachekeys.FeedInstanceStatusH
 		keyQ        = cachekeys.FeedInstanceStatusQ
@@ -29,22 +34,14 @@ func (a *Api) PostInstanceStatus(c echo.Context, params feeder.PostInstanceStatu
 		timeout = 2 * time.Second
 	)
 
-	log := getLog(c)
-
-	nodeID := nodeIDFromContext(c)
-	if nodeID == "" {
-		log.Debug("node auth problem")
-		return JSONNodeAuthProblem(c)
-	}
-
 	clusterID := clusterIDFromContext(c)
 	if clusterID == "" {
-		return JSONProblemf(c, http.StatusConflict, "Refused", "authenticated node doesn't define cluster id")
+		return JSONProblemf(c, http.StatusConflict, "refused: authenticated node doesn't define cluster id")
 	}
 
 	var payload feeder.PostInstanceStatusJSONRequestBody
 	if err := c.Bind(&payload); err != nil {
-		return JSONProblem(c, http.StatusBadRequest, "Failed to json decode request body", err.Error())
+		return JSONProblem(c, http.StatusBadRequest, err.Error())
 	}
 
 	if params.Sync != nil && *params.Sync {
@@ -56,12 +53,17 @@ func (a *Api) PostInstanceStatus(c echo.Context, params feeder.PostInstanceStatu
 
 	if !strings.HasPrefix(payload.Version, "2.") {
 		log.Error(fmt.Sprintf("unexpected version %s", payload.Version))
-		return JSONProblemf(c, http.StatusBadRequest, "BadRequest", "unsupported data client version: %s", payload.Version)
+		return JSONProblemf(c, http.StatusBadRequest, "unsupported data client version: %s", payload.Version)
 	}
+
+	if payload.Path == "" {
+		return JSONProblem(c, http.StatusBadRequest, "missing or empty instance path")
+	}
+	log = log.With(logObject, payload.Path)
 
 	b, err := json.Marshal(payload)
 	if err != nil {
-		return JSONProblem(c, http.StatusInternalServerError, "Failed to re-encode config", err.Error())
+		return JSONProblemf(c, http.StatusInternalServerError, "json encode request body: %s", err)
 	}
 
 	id := fmt.Sprintf("%s@%s@%s", payload.Path, nodeID, clusterID)
@@ -73,16 +75,18 @@ func (a *Api) PostInstanceStatus(c echo.Context, params feeder.PostInstanceStatu
 		pubsub = a.Redis.Subscribe(ctx, cachekeys.FeedInstanceStatusP)
 		defer func() {
 			if err := pubsub.Close(); err != nil {
-				log.Error(fmt.Sprintf("can't close subscription from %s: %s", cachekeys.FeedInstanceStatusP, err))
+				log.Error("redis pubsub Close", logError, err)
 			}
 		}()
 		if i, err := pubsub.Receive(ctx); err != nil {
-			return JSONProblemf(c, http.StatusInternalServerError, "redis subscription", "can't subscribe to %s: %s", cachekeys.FeedInstanceStatusP, err)
+			log.Error("redis pubsub Receive", logError, err)
+			return JSONError(c)
 		} else {
 			switch i.(type) {
 			case *redis.Subscription:
 			default:
-				return JSONProblemf(c, http.StatusInternalServerError, "redis subscription", "unexpected message type %T", i)
+				log.Error(fmt.Sprintf("redis pubsub Receive unexpected message type %T", i))
+				return JSONError(c)
 			}
 		}
 		doneC = make(chan any)
@@ -97,7 +101,7 @@ func (a *Api) PostInstanceStatus(c echo.Context, params feeder.PostInstanceStatu
 				}
 
 				if i, err := pubsub.Receive(ctx); err != nil {
-					log.Debug(fmt.Sprintf("can't receive from %s: %s", cachekeys.FeedInstanceStatusP, err))
+					log.Debug("redis pubsub Receive", logError, err)
 					return
 				} else {
 					switch m := i.(type) {
@@ -105,7 +109,7 @@ func (a *Api) PostInstanceStatus(c echo.Context, params feeder.PostInstanceStatu
 						if m == nil {
 							continue
 						} else if m.Payload == id {
-							log.Debug(fmt.Sprintf("got from %s: %s", cachekeys.FeedInstanceStatusP, id))
+							log.Debug("redis pubsub Received matching id")
 							doneC <- nil
 							return
 						}
@@ -116,17 +120,15 @@ func (a *Api) PostInstanceStatus(c echo.Context, params feeder.PostInstanceStatu
 	}
 
 	// Store data in Redis hash with generated ID as key
-	s := fmt.Sprintf("HSET %s %s", keyH, id)
-
+	log.Debug("Hset keyH")
 	if _, err := a.Redis.HSet(ctx, keyH, id, b).Result(); err != nil {
-		s = fmt.Sprintf("%s: %s", s, err)
-		log.Error(s)
-		return JSONProblem(c, http.StatusInternalServerError, "", s)
+		log.Error("Hset keyH", logError, err)
+		return JSONError(c)
 	}
 
-	if err := a.pushNotPending(ctx, keyPendingH, keyQ, id); err != nil {
-		log.Error(fmt.Sprintf("can't push %s %s: %s", keyQ, id, err))
-		return JSONProblemf(c, http.StatusInternalServerError, "redis operation", "can't push %s %s: %s", keyQ, id, err)
+	if err := a.pushNotPending(ctx, log, keyPendingH, keyQ, id); err != nil {
+		log.Error("pushNotPending", logError, err)
+		return JSONError(c)
 	}
 
 	if syncMode {

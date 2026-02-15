@@ -2,7 +2,6 @@ package feederhandlers
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -14,43 +13,46 @@ import (
 // PostInstanceResourceInfo will populate FeedInstanceResourceInfo <path>@<nodeID>@<clusterID>
 // with posted instance resource information. The auth middleware has prepared nodeID and clusterID.
 func (a *Api) PostInstanceResourceInfo(c echo.Context) error {
+	nodeID, log := getNodeIDAndLogger(c, "PostInstanceResourceInfo")
+	if nodeID == "" {
+		return JSONNodeAuthProblem(c)
+	}
+
 	var data feeder.PostInstanceResourceInfoJSONRequestBody
 	keyH := cachekeys.FeedInstanceResourceInfoH
 	keyQ := cachekeys.FeedInstanceResourceInfoQ
 	keyPendingH := cachekeys.FeedInstanceResourceInfoPendingH
-	log := getLog(c)
-	nodeID := nodeIDFromContext(c)
-	if nodeID == "" {
-		log.Debug("node auth problem")
-		return JSONNodeAuthProblem(c)
-	}
+
 	clusterID := clusterIDFromContext(c)
 	if clusterID == "" {
-		return JSONProblemf(c, http.StatusConflict, "Refused", "authenticated node doesn't define cluster id")
+		return JSONProblemf(c, http.StatusConflict, "refused: authenticated node doesn't define cluster id")
 	}
 
 	if err := c.Bind(&data); err != nil {
-		return JSONProblem(c, http.StatusBadRequest, "Failed to json decode request body", err.Error())
+		log.Debug("Bind", logError, err)
+		return JSONProblem(c, http.StatusBadRequest, err.Error())
 	}
 	if data.Path == "" {
 		log.Debug("bad request: missing or empty instance path")
-		return JSONProblem(c, http.StatusBadRequest, "BadRequest: missing or empty instance path", "")
+		return JSONProblem(c, http.StatusBadRequest, "missing or empty instance path")
 	}
+	log = log.With(logObject, data.Path)
 	b, err := json.Marshal(data)
 	if err != nil {
-		return JSONProblem(c, http.StatusInternalServerError, "Failed to re-encode config", err.Error())
+		log.Warn("Marshal", logError, err)
+		return JSONError(c)
 	}
 	ctx := c.Request().Context()
 	idx := data.Path + "@" + nodeID + "@" + clusterID
-	log.Info(fmt.Sprintf("HSET %s %s", keyH, idx))
+	log.Info("HSet keyH")
 	if err := a.Redis.HSet(ctx, keyH, idx, b).Err(); err != nil {
-		log.Error(fmt.Sprintf("HSET %s %s", keyH, idx))
-		return JSONProblemf(c, http.StatusInternalServerError, "redis operation", "can't HSET %s %s ...: %s", keyH, idx, err)
+		log.Error("HSet keyH", logError, err)
+		return JSONError(c)
 	}
 
-	if err := a.pushNotPending(ctx, keyPendingH, keyQ, idx); err != nil {
-		log.Error(fmt.Sprintf("can't push %s %s: %s", keyQ, idx, err))
-		return JSONProblemf(c, http.StatusInternalServerError, "redis operation", "can't push %s %s: %s", keyQ, idx, err)
+	if err := a.pushNotPending(ctx, log, keyPendingH, keyQ, idx); err != nil {
+		log.Error("pushNotPending", logError, err)
+		return JSONError(c)
 	}
 	return c.JSON(http.StatusAccepted, nil)
 }
