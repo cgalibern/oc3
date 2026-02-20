@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -14,21 +12,14 @@ var (
 	configCandidateDirs = []string{"/etc/oc3/", "$HOME/.config/oc3", "./"}
 )
 
-func logConfigDir() {
-	slog.Info(fmt.Sprintf("candidate config directories: %s", configCandidateDirs))
-}
-
-func logConfigFileUsed() {
-	slog.Info(fmt.Sprintf("used config file: %s", viper.ConfigFileUsed()))
-}
-
 func workerSection(name string) string {
 	if name != "" {
-		return "worker." + name
+		return sectionWorker + "." + name
 	} else {
-		return "worker"
+		return sectionWorker
 	}
 }
+
 func setDefaultWorkerConfig(name string) {
 	section := workerSection(name)
 	uxSocket := "/var/run/oc3_worker_pprof.sock"
@@ -45,6 +36,85 @@ func setDefaultWorkerConfig(name string) {
 	viper.SetDefault(section+".tx", true)
 }
 
+func setDefaultFeederConfig() {
+	s := sectionFeeder
+	viper.SetDefault(s+".addr", "127.0.0.1:8080")
+	viper.SetDefault(s+".pprof.uxsocket", "/var/run/oc3_feeder_pprof.sock")
+	viper.SetDefault(s+".pprof.net.enable", false)
+	viper.SetDefault(s+".pprof.ux.enable", false)
+	viper.SetDefault(s+".pprof.ux.socket", "/var/run/oc3_feeder_pprof.sock")
+	viper.SetDefault(s+".pprof.enable", false)
+	viper.SetDefault(s+".metrics.enable", false)
+	viper.SetDefault(s+".ui.enable", false)
+	viper.SetDefault(s+".sync.timeout", "2s")
+}
+
+func setDefaultServerConfig() {
+	s := sectionServer
+	viper.SetDefault(s+".addr", "127.0.0.1:8081")
+	viper.SetDefault(s+"pprof.pprof.net.enable", false)
+	viper.SetDefault(s+"pprof.pprof.ux.enable", false)
+	viper.SetDefault(s+"pprof.pprof.ux.socket", "/var/run/oc3_server_pprof.sock")
+	viper.SetDefault(s+".metrics.enable", false)
+	viper.SetDefault(s+".ui.enable", false)
+	viper.SetDefault(s+".sync.timeout", "2s")
+	viper.SetDefault(s+".allow_anon_register", false)
+}
+
+func setDefaultSchedulerConfig() {
+	s := sectionScheduler
+	viper.SetDefault(s+".addr", "127.0.0.1:8082")
+	viper.SetDefault(s+".pprof.net.enable", false)
+	viper.SetDefault(s+".pprof.ux.enable", false)
+	viper.SetDefault(s+".pprof.ux.socket", "/var/run/oc3_scheduler_pprof.sock")
+	viper.SetDefault(s+".metrics.enable", false)
+	viper.SetDefault(s+".task.trim.retention", 365)
+	viper.SetDefault(s+".task.trim.batch_size", 1000)
+}
+
+func setDefaultMessengerConfig() {
+	s := sectionMessenger
+	viper.SetDefault(s+".addr", "127.0.0.1:8083")
+	viper.SetDefault(s+".pprof.net.enable", false)
+	viper.SetDefault(s+".pprof.ux.enable", false)
+	viper.SetDefault(s+".pprof.ux.socket", "/var/run/oc3_messenger_pprof.sock")
+	viper.SetDefault(s+".metrics.enable", false)
+	viper.SetDefault(s+".key", "magix123")
+	viper.SetDefault(s+".url", "http://127.0.0.1:8889")
+	viper.SetDefault(s+".require_token", false)
+	viper.SetDefault(s+".key_file", "")
+	viper.SetDefault(s+".cert_file", "")
+
+	setDefaultAuthConfig()
+}
+
+func setDefaultRunnerConfig() {
+	s := sectionRunner
+	viper.SetDefault(s+".addr", "127.0.0.1:8084")
+	viper.SetDefault(s+".pprof.net.enable", false)
+	viper.SetDefault(s+".pprof.ux.enable", false)
+	viper.SetDefault(s+".pprof.ux.socket", "/var/run/oc3_runner_pprof.sock")
+	viper.SetDefault(s+".metrics.enable", false)
+}
+
+func setDefaultDBConfig() {
+	viper.SetDefault("db.username", "opensvc")
+	viper.SetDefault("db.host", "127.0.0.1")
+	viper.SetDefault("db.port", "3306")
+	viper.SetDefault("db.log.level", "warn")
+	viper.SetDefault("db.log.slow_query_threshold", "1s")
+}
+
+func setDefaultRedisConfig() {
+	viper.SetDefault("redis.db", 0)
+	viper.SetDefault("redis.address", "localhost:6379")
+	viper.SetDefault("redis.password", "")
+}
+
+func setDefaultAuthConfig() {
+	viper.SetDefault("w2p_hmac", "sha512:7755f108-1b83-45dc-8302-54be8f3616a1")
+}
+
 func initConfig() error {
 	// env
 	viper.SetEnvPrefix("OC3")
@@ -52,60 +122,14 @@ func initConfig() error {
 	viper.AutomaticEnv()
 
 	// defaults
-	viper.SetDefault("db.username", "opensvc")
-	viper.SetDefault("db.host", "127.0.0.1")
-	viper.SetDefault("db.port", "3306")
-	viper.SetDefault("db.log.level", "warn")
-	viper.SetDefault("db.log.slow_query_threshold", "1s")
-
-	viper.SetDefault("redis.db", 0)
-	viper.SetDefault("redis.address", "localhost:6379")
-	viper.SetDefault("redis.password", "")
-
-	viper.SetDefault("feeder.addr", "127.0.0.1:8080")
-	viper.SetDefault("feeder.pprof.uxsocket", "/var/run/oc3_feeder_pprof.sock")
-	viper.SetDefault("feeder.pprof.net.enable", false)
-	viper.SetDefault("feeder.pprof.ux.enable", false)
-	viper.SetDefault("feeder.pprof.ux.socket", "/var/run/oc3_feeder_pprof.sock")
-	viper.SetDefault("feeder.pprof.enable", false)
-	viper.SetDefault("feeder.metrics.enable", false)
-	viper.SetDefault("feeder.ui.enable", false)
-	viper.SetDefault("feeder.sync.timeout", "2s")
-
-	viper.SetDefault("server.addr", "127.0.0.1:8081")
-	viper.SetDefault("serverpprof.pprof.net.enable", false)
-	viper.SetDefault("serverpprof.pprof.ux.enable", false)
-	viper.SetDefault("serverpprof.pprof.ux.socket", "/var/run/oc3_server_pprof.sock")
-	viper.SetDefault("server.metrics.enable", false)
-	viper.SetDefault("server.ui.enable", false)
-	viper.SetDefault("server.sync.timeout", "2s")
-
-	viper.SetDefault("server.allow_anon_register", false)
-	viper.SetDefault("scheduler.addr", "127.0.0.1:8082")
-	viper.SetDefault("scheduler.pprof.net.enable", false)
-	viper.SetDefault("scheduler.pprof.ux.enable", false)
-	viper.SetDefault("scheduler.pprof.ux.socket", "/var/run/oc3_scheduler_pprof.sock")
-	viper.SetDefault("scheduler.metrics.enable", false)
-	viper.SetDefault("scheduler.task.trim.retention", 365)
-	viper.SetDefault("scheduler.task.trim.batch_size", 1000)
-	viper.SetDefault("w2p_hmac", "sha512:7755f108-1b83-45dc-8302-54be8f3616a1")
-
-	viper.SetDefault("messenger.addr", "127.0.0.1:8083")
-	viper.SetDefault("messenger.pprof.net.enable", false)
-	viper.SetDefault("messenger.pprof.ux.enable", false)
-	viper.SetDefault("messenger.pprof.ux.socket", "/var/run/oc3_messenger_pprof.sock")
-	viper.SetDefault("messenger.metrics.enable", false)
-	viper.SetDefault("messenger.key", "magix123")
-	viper.SetDefault("messenger.url", "http://127.0.0.1:8889")
-	viper.SetDefault("messenger.require_token", false)
-	viper.SetDefault("messenger.key_file", "")
-	viper.SetDefault("messenger.cert_file", "")
-
-	viper.SetDefault("runner.addr", "127.0.0.1:8084")
-	viper.SetDefault("runner.pprof.net.enable", false)
-	viper.SetDefault("runner.pprof.ux.enable", false)
-	viper.SetDefault("runner.pprof.ux.socket", "/var/run/oc3_runner_pprof.sock")
-	viper.SetDefault("runner.metrics.enable", false)
+	setDefaultDBConfig()
+	setDefaultRedisConfig()
+	setDefaultFeederConfig()
+	setDefaultServerConfig()
+	setDefaultSchedulerConfig()
+	setDefaultMessengerConfig()
+	setDefaultMessengerConfig()
+	setDefaultRunnerConfig()
 
 	// config file
 	viper.SetConfigName("config")
@@ -117,7 +141,7 @@ func initConfig() error {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			return err
 		} else {
-			slog.Info(err.Error())
+			return err
 		}
 	}
 	return nil

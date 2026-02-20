@@ -28,10 +28,10 @@ func (t *messengerT) authMiddleware(publicPath, publicPrefix []string) echo.Midd
 }
 
 func startMessenger() error {
-	if err := setup(); err != nil {
+	if err := setup(sectionMessenger); err != nil {
 		return err
 	}
-	t := &messengerT{section: "messenger"}
+	t := &messengerT{section: sectionMessenger}
 	return t.run()
 }
 
@@ -55,10 +55,10 @@ func (t *messengerT) run() error {
 	cometCmd := messenger.CmdComet{
 		Address:      u.Hostname(),
 		Port:         u.Port(),
-		Key:          viper.GetString("messenger.key"),
-		RequireToken: viper.GetBool("messenger.require_token"),
-		CertFile:     viper.GetString("messenger.cert_file"),
-		KeyFile:      viper.GetString("messenger.key_file"),
+		Key:          viper.GetString(sectionMessenger + ".key"),
+		RequireToken: viper.GetBool(sectionMessenger + ".require_token"),
+		CertFile:     viper.GetString(sectionMessenger + ".cert_file"),
+		KeyFile:      viper.GetString(sectionMessenger + ".key_file"),
 	}
 
 	return cometCmd.Run()

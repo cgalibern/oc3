@@ -3,10 +3,14 @@ package cmd
 import (
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
+	"github.com/opensvc/oc3/util/logkey"
 	"github.com/opensvc/oc3/util/version"
 )
 
@@ -14,6 +18,15 @@ var (
 	debug bool
 
 	GroupIDSubsystems = "subsystems"
+)
+
+const (
+	sectionFeeder    = "feeder"
+	sectionMessenger = "messenger"
+	sectionRunner    = "runner"
+	sectionScheduler = "scheduler"
+	sectionServer    = "server"
+	sectionWorker    = "worker"
 )
 
 func NewGroupSubsystems() *cobra.Group {
@@ -32,11 +45,14 @@ func cmdWorker() *cobra.Command {
 		Use:     "worker",
 		Short:   "run queued jobs",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			setDefaultWorkerConfig(name)
-			if err := setup(); err != nil {
-				return err
+			if strings.Contains(name, ".") {
+				return fmt.Errorf("unexpected worker name with '.': %s", name)
 			}
-			if t, err := newWorker(name, maxRunners, queues); err != nil {
+			setDefaultWorkerConfig(name)
+			section := workerSection(name)
+			if err := setup(section); err != nil {
+				return err
+			} else if t, err := newWorker(section, maxRunners, queues); err != nil {
 				return err
 			} else {
 				return t.run()
@@ -55,7 +71,7 @@ func cmdFeeder() *cobra.Command {
 		Use:     "feeder",
 		Short:   "serve the data feed api to nodes",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := setup(); err != nil {
+			if err := setup(sectionFeeder); err != nil {
 				return err
 			}
 			if t, err := newFeeder(); err != nil {
@@ -73,7 +89,7 @@ func cmdApiCollector() *cobra.Command {
 		Use:     "server",
 		Short:   "serve the collector api to clients",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := setup(); err != nil {
+			if err := setup(sectionServer); err != nil {
 				return err
 			}
 			if t, err := newServer(); err != nil {
@@ -177,15 +193,21 @@ func Root(args []string) *cobra.Command {
 	return cmd
 }
 
-func setup() error {
+func setup(section string) error {
+	// Prepare default logging
+	logLevel := slog.LevelInfo
 	if debug {
-		slog.SetLogLoggerLevel(slog.LevelDebug)
+		slog.SetLogLoggerLevel(logLevel)
 	}
-	logConfigDir()
+	logHandlerOptions := slog.HandlerOptions{Level: logLevel}
+	logHandler := slog.NewJSONHandler(os.Stdout, &logHandlerOptions)
+	slog.SetDefault(slog.New(logHandler).With(slog.String(logkey.Section, section)))
+	slog.Debug(fmt.Sprintf("candidate config directories: %s", configCandidateDirs))
+
 	if err := initConfig(); err != nil {
 		return err
 	}
-	logConfigFileUsed()
+	slog.Info(fmt.Sprintf("used config file: %s", viper.ConfigFileUsed()))
 	slog.Info(fmt.Sprintf("oc3 version: %s", version.Version()))
 	return nil
 }

@@ -29,13 +29,13 @@ func (t *runnerT) authMiddleware(publicPath, publicPrefix []string) echo.Middlew
 }
 
 func newRunner() (*runnerT, error) {
-	if err := setup(); err != nil {
+	if err := setup(sectionRunner); err != nil {
 		return nil, err
 	}
 	if db, err := newDatabase(); err != nil {
 		return nil, err
 	} else {
-		t := &runnerT{db: db, section: "runner"}
+		t := &runnerT{db: db, section: sectionRunner}
 		return t, nil
 	}
 }

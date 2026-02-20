@@ -26,7 +26,7 @@ func newServer() (*server, error) {
 	if db, err := newDatabase(); err != nil {
 		return nil, err
 	} else {
-		return &server{db: db, section: "server", redis: newRedis()}, nil
+		return &server{db: db, section: sectionServer, redis: newRedis()}, nil
 	}
 }
 

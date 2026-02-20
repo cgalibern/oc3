@@ -26,7 +26,7 @@ func newFeeder() (*feeder, error) {
 	if db, err := newDatabase(); err != nil {
 		return nil, err
 	} else {
-		return &feeder{db: db, section: "feeder", redis: newRedis()}, nil
+		return &feeder{db: db, section: sectionFeeder, redis: newRedis()}, nil
 	}
 }
 

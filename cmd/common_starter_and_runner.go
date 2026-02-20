@@ -23,7 +23,7 @@ const (
 )
 
 type (
-	sectioner interface {
+	Sectioner interface {
 		Section() string
 	}
 
@@ -40,16 +40,15 @@ type (
 	}
 )
 
-func run(i sectioner) error {
+func run(i Sectioner) error {
 	if ok, errC := start(i); ok {
-		slog.Info(fmt.Sprintf("%s started", i.Section()))
+		slog.Info("started")
 		return <-errC
-	} else {
-		return fmt.Errorf("can't start %s", i.Section())
 	}
+	return fmt.Errorf("start failed")
 }
 
-func start(i sectioner) (bool, <-chan error) {
+func start(i Sectioner) (bool, <-chan error) {
 	var needRun bool
 	errC := make(chan error, 1)
 	section := i.Section()

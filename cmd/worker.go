@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	_ "net/http/pprof"
-	"strings"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/labstack/echo/v4"
@@ -13,6 +12,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/opensvc/oc3/cachekeys"
+	"github.com/opensvc/oc3/util/logkey"
 	"github.com/opensvc/oc3/worker"
 	"github.com/opensvc/oc3/xauth"
 )
@@ -27,25 +27,22 @@ type (
 	}
 )
 
-func newWorker(name string, runners int, queues []string) (*workerT, error) {
-	if db, err := newDatabase(); err != nil {
+func newWorker(section string, runners int, queues []string) (*workerT, error) {
+	db, err := newDatabase()
+	if err != nil {
 		return nil, err
-	} else if strings.Contains(name, ".") {
-		return nil, fmt.Errorf("unexpected worker name with '.': %s", name)
-	} else {
-		section := workerSection(name)
-		t := &workerT{db: db, section: section, runners: runners, redis: newRedis()}
-		if runners < viper.GetInt(t.section+".runners") {
-			t.runners = viper.GetInt(t.section + ".runners")
-		}
-		if len(queues) == 0 {
-			queues = viper.GetStringSlice(t.section + ".queues")
-		}
-		for _, q := range queues {
-			t.queues = append(t.queues, cachekeys.QueuePrefix+q)
-		}
-		return t, nil
 	}
+	t := &workerT{db: db, section: section, runners: runners, redis: newRedis()}
+	if runners < viper.GetInt(t.section+".runners") {
+		t.runners = viper.GetInt(t.section + ".runners")
+	}
+	if len(queues) == 0 {
+		queues = viper.GetStringSlice(t.section + ".queues")
+	}
+	for _, q := range queues {
+		t.queues = append(t.queues, cachekeys.QueuePrefix+q)
+	}
+	return t, nil
 }
 
 func (t *workerT) Section() string { return t.section }
@@ -62,10 +59,12 @@ func (t *workerT) run() error {
 	}
 
 	if ok, errC := start(t); ok {
-		slog.Info(fmt.Sprintf("%s started", t.Section()))
+		slog.Info("started")
 		go func() {
 			if err := <-errC; err != nil {
-				slog.Error(fmt.Sprintf("%s stopped: %s", t.Section(), err))
+				slog.Error("stopped", logkey.Error, err)
+			} else {
+				slog.Debug("stopped", logkey.Error, err)
 			}
 		}()
 	}
