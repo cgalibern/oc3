@@ -4,20 +4,23 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+
+	"github.com/opensvc/oc3/util/echolog"
+	"github.com/opensvc/oc3/util/logkey"
 )
 
 // GetNodeComplianceModulesets handles GET /nodes/{node_id}/compliance/modulesets
 func (a *Api) GetNodeComplianceModulesets(c echo.Context, nodeId string) error {
-	log := getLog(c)
+	log := echolog.GetLogHandler(c, "GetNodeComplianceModulesets")
 	odb := a.cdbSession()
 	ctx := c.Request().Context()
 
-	log.Info("GetNodeComplianceModulesets called", "node_id", nodeId)
+	log.Info("called", logkey.NodeID, nodeId)
 
 	// get node ID
 	node, err := odb.NodeByNodeIDOrNodename(ctx, nodeId)
 	if err != nil {
-		log.Error("GetNodeComplianceModulesets: cannot find node", "node", nodeId, "error", err)
+		log.Error("cannot find node", "node", nodeId, logkey.Error, err)
 		return JSONProblemf(c, http.StatusNotFound, "node %s not found", nodeId)
 	}
 
@@ -26,7 +29,7 @@ func (a *Api) GetNodeComplianceModulesets(c echo.Context, nodeId string) error {
 	isManager := IsManager(c)
 	modulesets, err := odb.CompNodeAttachedModulesets(ctx, node.NodeID, groups, isManager)
 	if err != nil {
-		log.Error("GetNodeComplianceModulesets: cannot get attached modulesets", "node_id", node.NodeID, "error", err)
+		log.Error("cannot get attached modulesets", logkey.NodeID, node.NodeID, logkey.Error, err)
 		return JSONProblemf(c, http.StatusInternalServerError, "cannot get attached modulesets for node %s", node.NodeID)
 	}
 

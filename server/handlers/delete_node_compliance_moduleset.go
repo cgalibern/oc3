@@ -6,11 +6,14 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+
+	"github.com/opensvc/oc3/util/echolog"
+	"github.com/opensvc/oc3/util/logkey"
 )
 
 // DeleteNodeComplianceModuleset handles DELETE /nodes/{node_id}/compliance/modulesets/{mset_id}
 func (a *Api) DeleteNodeComplianceModuleset(c echo.Context, nodeId string, msetId string) error {
-	log := getLog(c)
+	log := echolog.GetLogHandler(c, "DeleteNodeComplianceModuleset")
 	odb := a.cdbSession()
 	ctx := c.Request().Context()
 	odb.CreateTx(ctx, nil)
@@ -27,40 +30,40 @@ func (a *Api) DeleteNodeComplianceModuleset(c echo.Context, nodeId string, msetI
 		}
 	}()
 
-	log.Info("DeleteNodeComplianceModuleset called", "node_id", nodeId, "mset_id", msetId)
+	log.Info("called", logkey.NodeID, nodeId, logkey.MSetID, msetId)
 
 	responsible, err := odb.NodeResponsible(ctx, nodeId, UserGroupsFromContext(c), IsManager(c))
 	if err != nil {
-		log.Error("DeleteNodeComplianceModuleset: cannot check if user is responsible for the node", "node_id", nodeId, "error", err)
+		log.Error("cannot check if user is responsible for the node", logkey.NodeID, nodeId, logkey.Error, err)
 		return JSONProblemf(c, http.StatusInternalServerError, "cannot check if user is responsible for node %s", nodeId)
 	}
 	if !responsible {
-		log.Info("DeleteNodeComplianceModuleset: user is not responsible for this node", "node_id", nodeId)
+		log.Info("user is not responsible for this node", logkey.NodeID, nodeId)
 		return JSONProblemf(c, http.StatusForbidden, "user is not responsible for node %s", nodeId)
 	}
 
 	// get moduleset name
 	_, err = odb.CompModulesetName(ctx, msetId)
 	if err != nil {
-		log.Error("DeleteNodeComplianceModuleset: cannot find moduleset", "mset_id", msetId, "error", err)
+		log.Error("cannot find moduleset", logkey.MSetID, msetId, logkey.Error, err)
 		return JSONProblemf(c, http.StatusNotFound, "moduleset %s not found", msetId)
 	}
 
 	// check if the moduleset is attached to the node
 	attached, err := odb.CompModulesetAttached(ctx, nodeId, msetId)
 	if err != nil {
-		log.Error("DeleteNodeComplianceModuleset: cannot check if moduleset is attached", "node_id", nodeId, "mset_id", msetId, "error", err)
+		log.Error("cannot check if moduleset is attached", logkey.NodeID, nodeId, logkey.MSetID, msetId, logkey.Error, err)
 		return JSONProblemf(c, http.StatusInternalServerError, "cannot check if moduleset %s is attached to node %s", msetId, nodeId)
 	}
 	if !attached {
-		log.Info("DeleteNodeComplianceModuleset: moduleset is not attached to this node", "node_id", nodeId, "mset_id", msetId)
+		log.Info("moduleset is not attached to this node", logkey.NodeID, nodeId, logkey.MSetID, msetId)
 		return JSONProblemf(c, http.StatusConflict, "moduleset %s is not attached to this node", msetId)
 	}
 
 	// detach moduleset from node
 	_, err = odb.CompModulesetDetachNode(ctx, nodeId, []string{msetId})
 	if err != nil {
-		log.Error("DeleteNodeComplianceModuleset: cannot detach moduleset from node", "node_id", nodeId, "mset_id", msetId, "error", err)
+		log.Error("cannot detach moduleset from node", logkey.NodeID, nodeId, logkey.MSetID, msetId, logkey.Error, err)
 		return JSONProblemf(c, http.StatusInternalServerError, "cannot detach moduleset %s from node %s", msetId, nodeId)
 	}
 

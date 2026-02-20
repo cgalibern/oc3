@@ -6,9 +6,12 @@ const (
 	ClusterID = "clusterID"
 	Error     = "error"
 	Handler   = "handler"
+	MSetID    = "mset_id"
 	NodeID    = "nodeID"
 	Nodename  = "nodename"
 	Object    = "object"
 	Objects   = "objects"
+	RSetID    = "rset_id"
 	Section   = "section"
+	TagID     = "tag_id"
 )

@@ -4,17 +4,20 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+
+	"github.com/opensvc/oc3/util/echolog"
+	"github.com/opensvc/oc3/util/logkey"
 )
 
 // handleGetTags is the common logic for getting tags
 func (a *Api) handleGetTags(c echo.Context, tagID *int) error {
-	log := getLog(c)
+	log := echolog.GetLogHandler(c, "handleGetTags")
 	odb := a.cdbSession()
 	ctx := c.Request().Context()
 
 	tags, err := odb.GetTags(ctx, tagID)
 	if err != nil {
-		log.Error("handleGetTags: cannot get tags", "tag_id", tagID, "error", err)
+		log.Error("cannot get tags", logkey.TagID, tagID, logkey.Error, err)
 		return JSONProblemf(c, http.StatusInternalServerError, "cannot get tags")
 	}
 
@@ -32,7 +35,7 @@ func (a *Api) handleGetTags(c echo.Context, tagID *int) error {
 
 // GetTags handles GET /tags
 func (a *Api) GetTags(c echo.Context) error {
-	log := getLog(c)
-	log.Info("GetTags called")
+	log := echolog.GetLogHandler(c, "GetTags")
+	log.Info("called")
 	return a.handleGetTags(c, nil)
 }
