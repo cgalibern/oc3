@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/opensvc/oc3/feeder"
+	"github.com/opensvc/oc3/util/echolog"
 )
 
 type (
@@ -34,8 +35,8 @@ func init() {
 }
 
 func getNodeIDAndLogger(c echo.Context, handler string) (string, *slog.Logger) {
+	log := echolog.GetLogHandler(c, handler)
 	nodeID := nodeIDFromContext(c)
-	log := getLogHandler(c, handler)
 	if nodeID == "" {
 		log.Debug("empty node id")
 	}

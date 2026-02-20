@@ -13,6 +13,7 @@ import (
 
 	"github.com/opensvc/oc3/cachekeys"
 	"github.com/opensvc/oc3/feeder"
+	"github.com/opensvc/oc3/util/logkey"
 )
 
 func (a *Api) PostInstanceStatus(c echo.Context, params feeder.PostInstanceStatusParams) error {
@@ -59,7 +60,7 @@ func (a *Api) PostInstanceStatus(c echo.Context, params feeder.PostInstanceStatu
 	if payload.Path == "" {
 		return JSONProblem(c, http.StatusBadRequest, "missing or empty instance path")
 	}
-	log = log.With(logObject, payload.Path)
+	log = log.With(logkey.Object, payload.Path)
 
 	b, err := json.Marshal(payload)
 	if err != nil {
@@ -75,11 +76,11 @@ func (a *Api) PostInstanceStatus(c echo.Context, params feeder.PostInstanceStatu
 		pubsub = a.Redis.Subscribe(ctx, cachekeys.FeedInstanceStatusP)
 		defer func() {
 			if err := pubsub.Close(); err != nil {
-				log.Error("redis pubsub Close", logError, err)
+				log.Error("redis pubsub Close", logkey.Error, err)
 			}
 		}()
 		if i, err := pubsub.Receive(ctx); err != nil {
-			log.Error("redis pubsub Receive", logError, err)
+			log.Error("redis pubsub Receive", logkey.Error, err)
 			return JSONError(c)
 		} else {
 			switch i.(type) {
@@ -101,7 +102,7 @@ func (a *Api) PostInstanceStatus(c echo.Context, params feeder.PostInstanceStatu
 				}
 
 				if i, err := pubsub.Receive(ctx); err != nil {
-					log.Debug("redis pubsub Receive", logError, err)
+					log.Debug("redis pubsub Receive", logkey.Error, err)
 					return
 				} else {
 					switch m := i.(type) {
@@ -122,12 +123,12 @@ func (a *Api) PostInstanceStatus(c echo.Context, params feeder.PostInstanceStatu
 	// Store data in Redis hash with generated ID as key
 	log.Debug("Hset keyH")
 	if _, err := a.Redis.HSet(ctx, keyH, id, b).Result(); err != nil {
-		log.Error("Hset keyH", logError, err)
+		log.Error("Hset keyH", logkey.Error, err)
 		return JSONError(c)
 	}
 
 	if err := a.pushNotPending(ctx, log, keyPendingH, keyQ, id); err != nil {
-		log.Error("pushNotPending", logError, err)
+		log.Error("pushNotPending", logkey.Error, err)
 		return JSONError(c)
 	}
 

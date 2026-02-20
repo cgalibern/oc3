@@ -11,6 +11,7 @@ import (
 
 	"github.com/opensvc/oc3/cachekeys"
 	"github.com/opensvc/oc3/feeder"
+	"github.com/opensvc/oc3/util/logkey"
 )
 
 /*
@@ -57,7 +58,7 @@ func (a *Api) PostInstanceAction(c echo.Context) error {
 
 	b, err := json.Marshal(payload)
 	if err != nil {
-		log.Error("json encode body", logError, err)
+		log.Error("json encode body", logkey.Error, err)
 		return JSONError(c)
 	}
 
@@ -68,7 +69,7 @@ func (a *Api) PostInstanceAction(c echo.Context) error {
 
 	log.Debug("Hset FeedInstanceActionH")
 	if _, err := a.Redis.HSet(ctx, keyH, idx, b).Result(); err != nil {
-		log.Error("Hset FeedInstanceActionH", logError, err)
+		log.Error("Hset FeedInstanceActionH", logkey.Error, err)
 		return JSONError(c)
 	}
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/opensvc/oc3/cachekeys"
 	"github.com/opensvc/oc3/feeder"
+	"github.com/opensvc/oc3/util/logkey"
 )
 
 func (a *Api) PostDaemonStatus(c echo.Context) error {
@@ -32,16 +33,16 @@ func (a *Api) PostDaemonStatus(c echo.Context) error {
 	b, err := io.ReadAll(body)
 	defer func() {
 		if err := body.Close(); err != nil {
-			log.Warn("request body Close", logError, err)
+			log.Warn("request body Close", logkey.Error, err)
 		}
 	}()
 	if err != nil {
-		log.Warn("request ReadAll", logError, err)
+		log.Warn("request ReadAll", logkey.Error, err)
 		return JSONProblemf(c, http.StatusBadRequest, "ReadAll: %s", err)
 	}
 	postData := &feeder.PostDaemonStatus{}
 	if err := json.Unmarshal(b, postData); err != nil {
-		log.Debug("request Unmarshal", logError, err)
+		log.Debug("request Unmarshal", logkey.Error, err)
 		return JSONProblem(c, http.StatusBadRequest, err.Error())
 	} else {
 		mergeChanges(strings.Join(postData.Changes, " "))
@@ -54,7 +55,7 @@ func (a *Api) PostDaemonStatus(c echo.Context) error {
 	ctx := c.Request().Context()
 	log.Info("HSet FeedDaemonStatusH")
 	if err := a.Redis.HSet(ctx, cachekeys.FeedDaemonStatusH, nodeID, string(b)).Err(); err != nil {
-		log.Error("HSet FeedDaemonStatusH", logError, err)
+		log.Error("HSet FeedDaemonStatusH", logkey.Error, err)
 		return JSONError(c)
 	}
 	if len(mChange) > 0 {
@@ -68,7 +69,7 @@ func (a *Api) PostDaemonStatus(c echo.Context) error {
 		case redis.Nil:
 			// no existing changes to merge
 		default:
-			log.Error("HGet FeedDaemonStatusChangesH", logError, err)
+			log.Error("HGet FeedDaemonStatusChangesH", logkey.Error, err)
 			return JSONError(c)
 		}
 		l := make([]string, len(mChange))
@@ -79,26 +80,26 @@ func (a *Api) PostDaemonStatus(c echo.Context) error {
 		}
 		mergedChanges := strings.Join(l, " ")
 		// push changes
-		log.Debug("HSet FeedDaemonStatusChangesH", logChanges, mergedChanges)
+		log.Debug("HSet FeedDaemonStatusChangesH", logkey.Changes, mergedChanges)
 		if err := a.Redis.HSet(ctx, cachekeys.FeedDaemonStatusChangesH, nodeID, mergedChanges).Err(); err != nil {
-			log.Error("HSet FeedDaemonStatusChangesH", logChanges, mergedChanges, logError, err)
+			log.Error("HSet FeedDaemonStatusChangesH", logkey.Changes, mergedChanges, logkey.Error, err)
 			return JSONError(c)
 		}
 	}
 	if err := a.pushNotPending(ctx, log, cachekeys.FeedDaemonStatusPendingH, cachekeys.FeedDaemonStatusQ, nodeID); err != nil {
-		log.Error("pushNotPending", logError, err)
+		log.Error("pushNotPending", logkey.Error, err)
 		return JSONError(c)
 	}
 
 	clusterID := clusterIDFromContext(c)
 	if clusterID != "" {
 		if objects, err := a.getObjectConfigToFeed(ctx, clusterID); err != nil {
-			log.Warn("getObjectConfigToFeed", logError, err)
+			log.Warn("getObjectConfigToFeed", logkey.Error, err)
 		} else if len(objects) > 0 {
 			if err := a.removeObjectConfigToFeed(ctx, clusterID); err != nil {
-				log.Warn("removeObjectConfigToFeed", logError, err)
+				log.Warn("removeObjectConfigToFeed", logkey.Error, err)
 			}
-			log.Info("accepted with detected missing object configs", logObjects, objects)
+			log.Info("accepted with detected missing object configs", logkey.Objects, objects)
 			return c.JSON(http.StatusAccepted, feeder.DaemonStatusAccepted{ObjectWithoutConfig: &objects})
 		}
 	}

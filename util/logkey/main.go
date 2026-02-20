@@ -2,6 +2,13 @@
 package logkey
 
 const (
-	Error   = "error"
-	Section = "section"
+	Changes   = "changes"
+	ClusterID = "clusterID"
+	Error     = "error"
+	Handler   = "handler"
+	NodeID    = "nodeID"
+	Nodename  = "nodename"
+	Object    = "object"
+	Objects   = "objects"
+	Section   = "section"
 )

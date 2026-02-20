@@ -9,6 +9,7 @@ import (
 
 	"github.com/opensvc/oc3/cachekeys"
 	"github.com/opensvc/oc3/feeder"
+	"github.com/opensvc/oc3/util/logkey"
 )
 
 /*
@@ -50,7 +51,7 @@ func (a *Api) PutInstanceActionEnd(c echo.Context) error {
 
 	b, err := json.Marshal(payload)
 	if err != nil {
-		log.Error("Marshall", logError, err)
+		log.Error("Marshall", logkey.Error, err)
 		return JSONError(c)
 	}
 
@@ -60,12 +61,12 @@ func (a *Api) PutInstanceActionEnd(c echo.Context) error {
 
 	log.Debug("HSet keyH")
 	if _, err := a.Redis.HSet(ctx, keyH, idx, b).Result(); err != nil {
-		log.Error("HSet keyH", logError, err)
+		log.Error("HSet keyH", logkey.Error, err)
 		return JSONError(c)
 	}
 
 	if err := a.pushNotPending(ctx, log, keyPendingH, keyQ, idx); err != nil {
-		log.Error("pushNotPending", logError, err)
+		log.Error("pushNotPending", logkey.Error, err)
 		return JSONError(c)
 	}
 

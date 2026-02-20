@@ -7,6 +7,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/opensvc/oc3/cachekeys"
+	"github.com/opensvc/oc3/util/logkey"
 )
 
 func (a *Api) PostSystem(c echo.Context) error {
@@ -17,7 +18,7 @@ func (a *Api) PostSystem(c echo.Context) error {
 
 	b, err := io.ReadAll(c.Request().Body)
 	if err != nil {
-		log.Warn("request ReadAll", logError, err)
+		log.Warn("request ReadAll", logkey.Error, err)
 		return JSONProblemf(c, http.StatusBadRequest, "ReadAll: %s", err)
 	}
 
@@ -25,7 +26,7 @@ func (a *Api) PostSystem(c echo.Context) error {
 
 	log.Info("Hset FeedSystemH")
 	if _, err := a.Redis.HSet(ctx, cachekeys.FeedSystemH, nodeID, string(b)).Result(); err != nil {
-		log.Error("Hset FeedSystemH", logError, err)
+		log.Error("Hset FeedSystemH", logkey.Error, err)
 		return JSONError(c)
 	}
 

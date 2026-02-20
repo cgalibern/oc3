@@ -8,6 +8,7 @@ import (
 
 	"github.com/opensvc/oc3/cachekeys"
 	"github.com/opensvc/oc3/feeder"
+	"github.com/opensvc/oc3/util/logkey"
 )
 
 // PostObjectConfig will populate FeedObjectConfigH <path>@<nodeID>@<clusterID>
@@ -36,19 +37,19 @@ func (a *Api) PostObjectConfig(c echo.Context) error {
 	}
 	b, err := json.Marshal(payload)
 	if err != nil {
-		log.Error("json encode config", logError, err)
+		log.Error("json encode config", logkey.Error, err)
 		return JSONError(c)
 	}
 	ctx := c.Request().Context()
 	idx := payload.Path + "@" + nodeID + "@" + clusterID
 	log.Info("Hset keyH")
 	if err := a.Redis.HSet(ctx, keyH, idx, b).Err(); err != nil {
-		log.Error("Hset keyH", logError, err)
+		log.Error("Hset keyH", logkey.Error, err)
 		return JSONError(c)
 	}
 
 	if err := a.pushNotPending(ctx, log, keyPendingH, keyQ, idx); err != nil {
-		log.Error("pushNotPending", logError, err)
+		log.Error("pushNotPending", logkey.Error, err)
 		return JSONError(c)
 	}
 	return c.JSON(http.StatusAccepted, nil)
