@@ -213,7 +213,7 @@ func (d *jobFeedDaemonStatus) dbCheckClusterIDForNodeID(ctx context.Context) err
 }
 
 func (d *jobFeedDaemonStatus) dbCheckClusters(ctx context.Context) error {
-	if err := d.oDb.UpdateClustersData(ctx, d.clusterName, d.clusterName, string(d.rawData)); err != nil {
+	if err := d.oDb.UpdateClustersData(ctx, d.clusterName, d.clusterID, string(d.rawData)); err != nil {
 		return fmt.Errorf("dbCheckClusters %s (%s): %w", d.nodeID, d.clusterID, err)
 	}
 	return nil
