@@ -17793,6 +17793,231 @@ paths:
         - basicAuth: [ ]
         - bearerAuth: [ ]
         - { }
+  /compliance/agent/data:
+    get:
+      operationId: GetComplianceAgentData
+      description: |
+        What the agent of the calling node needs for a compliance run: the
+        modulesets and the resolved rulesets of the node, or of one of its objects
+        with path, and the relations of the modulesets. The ruleset osvc_collector
+        holds the ruleset_md5 the logs of the run refer to.
+      parameters:
+        - $ref: '#/components/parameters/inQueryComplianceAgentPath'
+        - in: query
+          name: moduleset
+          description: Use these modulesets rather than the attached ones.
+          schema:
+            type: array
+            items:
+              type: string
+      tags:
+        - collector
+      responses:
+        200:
+          description: The data of the run.
+          content:
+            application/json:
+              schema:
+                type: object
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+  /compliance/agent/logs:
+    post:
+      operationId: PostComplianceAgentLogs
+      description: |
+        Record the module results of a compliance run of the calling node, or of
+        one of its objects with path. A check also updates the compliance status.
+      parameters:
+        - $ref: '#/components/parameters/inQueryComplianceAgentPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/ComplianceAgentLog'
+      tags:
+        - collector
+      responses:
+        202:
+          $ref: '#/components/responses/ComplianceAgentInfo'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+  /compliance/agent/modulesets:
+    get:
+      operationId: GetComplianceAgentModulesets
+      description: |
+        The names of the modulesets the calling node may attach, sorted.
+      parameters:
+        - in: query
+          name: pattern
+          description: A sql LIKE pattern on the name. Default %.
+          schema:
+            type: string
+      tags:
+        - collector
+      responses:
+        200:
+          description: The names.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+  /compliance/agent/modulesets/{name}:
+    post:
+      operationId: PostComplianceAgentModuleset
+      description: |
+        Attach a moduleset to the calling node, or to one of its objects with path.
+        A moduleset already attached is no error.
+      parameters:
+        - $ref: '#/components/parameters/inPathComplianceAgentName'
+        - $ref: '#/components/parameters/inQueryComplianceAgentPath'
+      tags:
+        - collector
+      responses:
+        200:
+          $ref: '#/components/responses/ComplianceAgentInfo'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+    delete:
+      operationId: DeleteComplianceAgentModuleset
+      description: |
+        Detach a moduleset from the calling node, or from one of its objects with
+        path. The name all detaches every moduleset. A moduleset not attached is no
+        error.
+      parameters:
+        - $ref: '#/components/parameters/inPathComplianceAgentName'
+        - $ref: '#/components/parameters/inQueryComplianceAgentPath'
+      tags:
+        - collector
+      responses:
+        200:
+          $ref: '#/components/responses/ComplianceAgentInfo'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+  /compliance/agent/rulesets:
+    get:
+      operationId: GetComplianceAgentRulesets
+      description: |
+        The names of the rulesets the calling node may attach, sorted.
+      parameters:
+        - in: query
+          name: pattern
+          description: A sql LIKE pattern on the name. Default %.
+          schema:
+            type: string
+      tags:
+        - collector
+      responses:
+        200:
+          description: The names.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+  /compliance/agent/rulesets/{name}:
+    post:
+      operationId: PostComplianceAgentRuleset
+      description: |
+        Attach a ruleset to the calling node, or to one of its objects with path.
+        A ruleset already attached is no error.
+      parameters:
+        - $ref: '#/components/parameters/inPathComplianceAgentName'
+        - $ref: '#/components/parameters/inQueryComplianceAgentPath'
+      tags:
+        - collector
+      responses:
+        200:
+          $ref: '#/components/responses/ComplianceAgentInfo'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+    delete:
+      operationId: DeleteComplianceAgentRuleset
+      description: |
+        Detach a ruleset from the calling node, or from one of its objects with
+        path. The name all detaches every ruleset. A ruleset not attached is no
+        error.
+      parameters:
+        - $ref: '#/components/parameters/inPathComplianceAgentName'
+        - $ref: '#/components/parameters/inQueryComplianceAgentPath'
+      tags:
+        - collector
+      responses:
+        200:
+          $ref: '#/components/responses/ComplianceAgentInfo'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
   /compliance/modulesets:
     get:
       operationId: GetComplianceModulesets
@@ -20440,6 +20665,17 @@ paths:
 components:
 
   responses:
+    ComplianceAgentInfo:
+      description: What was done.
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - info
+            properties:
+              info:
+                type: string
     '200':
       description: OK
       content:
@@ -20504,6 +20740,24 @@ components:
             $ref: "#/components/schemas/Problem"
 
   schemas:
+    ComplianceAgentLog:
+      type: object
+      required:
+        - module
+        - status
+        - log
+        - action
+      properties:
+        module:
+          type: string
+        status:
+          type: integer
+        log:
+          type: string
+        action:
+          type: string
+        rset_md5:
+          type: string
     AuthInfo:
       type: object
       required: [basic, oidc, session]
@@ -27179,6 +27433,19 @@ components:
           $ref: '#/components/schemas/ListMeta'
 
   parameters:
+    inPathComplianceAgentName:
+      in: path
+      name: name
+      required: true
+      description: The name of the moduleset or ruleset.
+      schema:
+        type: string
+    inQueryComplianceAgentPath:
+      in: query
+      name: path
+      description: The object of the node, as namespace/kind/name. Default the node.
+      schema:
+        type: string
     inPathOrchestrationId:
       in: path
       name: orchestration_id

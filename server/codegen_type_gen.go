@@ -2884,6 +2884,15 @@ type CompServiceRulesetRow struct {
 	Updated          *string  `json:"updated,omitempty"`
 }
 
+// ComplianceAgentLog defines model for ComplianceAgentLog.
+type ComplianceAgentLog struct {
+	Action  string  `json:"action"`
+	Log     string  `json:"log"`
+	Module  string  `json:"module"`
+	RsetMd5 *string `json:"rset_md5,omitempty"`
+	Status  int     `json:"status"`
+}
+
 // ComplianceAttachmentOutcome defines model for ComplianceAttachmentOutcome.
 type ComplianceAttachmentOutcome struct {
 	// Info Its message, or why the pair was refused
@@ -6404,6 +6413,9 @@ type Version struct {
 	Version string  `json:"version"`
 }
 
+// InPathComplianceAgentName defines model for inPathComplianceAgentName.
+type InPathComplianceAgentName = string
+
 // InPathMsetId defines model for inPathMsetId.
 type InPathMsetId = string
 
@@ -6418,6 +6430,9 @@ type InPathOrchestrationRunId = int
 
 // InPathRsetId defines model for inPathRsetId.
 type InPathRsetId = string
+
+// InQueryComplianceAgentPath defines model for inQueryComplianceAgentPath.
+type InQueryComplianceAgentPath = string
 
 // InQueryFilter defines model for inQueryFilter.
 type InQueryFilter = []string
@@ -6469,6 +6484,11 @@ type N500 = Problem
 
 // N503 defines model for 503.
 type N503 = Problem
+
+// ComplianceAgentInfo defines model for ComplianceAgentInfo.
+type ComplianceAgentInfo struct {
+	Info string `json:"info"`
+}
 
 // basicAuthContextKey is the context key for basicAuth security scheme
 type basicAuthContextKey string
@@ -7718,6 +7738,60 @@ type GetClustersParams struct {
 type GetClusterParams struct {
 	// Props A list of properties to include in each data dictionnary.
 	Props *InQueryProps `form:"props,omitempty" json:"props,omitempty"`
+}
+
+// GetComplianceAgentDataParams defines parameters for GetComplianceAgentData.
+type GetComplianceAgentDataParams struct {
+	// Path The object of the node, as namespace/kind/name. Default the node.
+	Path *InQueryComplianceAgentPath `form:"path,omitempty" json:"path,omitempty"`
+
+	// Moduleset Use these modulesets rather than the attached ones.
+	Moduleset *[]string `form:"moduleset,omitempty" json:"moduleset,omitempty"`
+}
+
+// PostComplianceAgentLogsJSONBody defines parameters for PostComplianceAgentLogs.
+type PostComplianceAgentLogsJSONBody = []ComplianceAgentLog
+
+// PostComplianceAgentLogsParams defines parameters for PostComplianceAgentLogs.
+type PostComplianceAgentLogsParams struct {
+	// Path The object of the node, as namespace/kind/name. Default the node.
+	Path *InQueryComplianceAgentPath `form:"path,omitempty" json:"path,omitempty"`
+}
+
+// GetComplianceAgentModulesetsParams defines parameters for GetComplianceAgentModulesets.
+type GetComplianceAgentModulesetsParams struct {
+	// Pattern A sql LIKE pattern on the name. Default %.
+	Pattern *string `form:"pattern,omitempty" json:"pattern,omitempty"`
+}
+
+// DeleteComplianceAgentModulesetParams defines parameters for DeleteComplianceAgentModuleset.
+type DeleteComplianceAgentModulesetParams struct {
+	// Path The object of the node, as namespace/kind/name. Default the node.
+	Path *InQueryComplianceAgentPath `form:"path,omitempty" json:"path,omitempty"`
+}
+
+// PostComplianceAgentModulesetParams defines parameters for PostComplianceAgentModuleset.
+type PostComplianceAgentModulesetParams struct {
+	// Path The object of the node, as namespace/kind/name. Default the node.
+	Path *InQueryComplianceAgentPath `form:"path,omitempty" json:"path,omitempty"`
+}
+
+// GetComplianceAgentRulesetsParams defines parameters for GetComplianceAgentRulesets.
+type GetComplianceAgentRulesetsParams struct {
+	// Pattern A sql LIKE pattern on the name. Default %.
+	Pattern *string `form:"pattern,omitempty" json:"pattern,omitempty"`
+}
+
+// DeleteComplianceAgentRulesetParams defines parameters for DeleteComplianceAgentRuleset.
+type DeleteComplianceAgentRulesetParams struct {
+	// Path The object of the node, as namespace/kind/name. Default the node.
+	Path *InQueryComplianceAgentPath `form:"path,omitempty" json:"path,omitempty"`
+}
+
+// PostComplianceAgentRulesetParams defines parameters for PostComplianceAgentRuleset.
+type PostComplianceAgentRulesetParams struct {
+	// Path The object of the node, as namespace/kind/name. Default the node.
+	Path *InQueryComplianceAgentPath `form:"path,omitempty" json:"path,omitempty"`
 }
 
 // GetComplianceHistoryParams defines parameters for GetComplianceHistory.
@@ -15695,6 +15769,9 @@ type DeleteChecksSettingsJSONRequestBody = CheckKey
 
 // PostChecksSettingsJSONRequestBody defines body for PostChecksSettings for application/json ContentType.
 type PostChecksSettingsJSONRequestBody = CheckSettingsRequest
+
+// PostComplianceAgentLogsJSONRequestBody defines body for PostComplianceAgentLogs for application/json ContentType.
+type PostComplianceAgentLogsJSONRequestBody = PostComplianceAgentLogsJSONBody
 
 // PostComplianceAttachmentsJSONRequestBody defines body for PostComplianceAttachments for application/json ContentType.
 type PostComplianceAttachmentsJSONRequestBody = ComplianceAttachmentsInput
