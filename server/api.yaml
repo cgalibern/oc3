@@ -20405,6 +20405,40 @@ paths:
         - basicAuth: [ ]
         - bearerAuth: [ ]
 
+  /orchestration_runs/{run_id}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/inPathOrchestrationRunId'
+    post:
+      operationId: PostOrchestrationRunCancel
+      description: |
+        Cancel a run, for good: a running run stops as with POST
+        /orchestration_runs/{run_id}/stop, a failed or stopped run ends there.
+        A cancelled run neither resumes nor goes on past its step. An action an
+        agent already runs goes on and its result is recorded. 409 when the run
+        is neither running, failed nor stopped. Manager only.
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestrationRun'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        409:
+          $ref: '#/components/responses/409'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
   /orchestration_runs/{run_id}/continue:
     parameters:
       - $ref: '#/components/parameters/inPathOrchestrationRunId'
@@ -27181,7 +27215,11 @@ components:
 
     OrchestrationRunStatus:
       type: string
-      enum: [running, succeeded, failed, stopped]
+      description: |
+        cancelled: the run was stopped for good, while running or after it failed
+        or was stopped: it neither resumes nor goes on (see POST
+        /orchestration_runs/{run_id}/cancel).
+      enum: [running, succeeded, failed, stopped, cancelled]
 
     OrchestrationRunStepStatus:
       type: string

@@ -193,7 +193,7 @@ func (a *Api) PostOrchestrationRunStop(c echo.Context, id server.InPathOrchestra
 		return JSONProblemf(c, http.StatusConflict, "run %d is %s, not running", id, run.Status)
 	}
 	author, _ := c.Get(XUserEmail).(string)
-	if err := a.stopOrchestrationRun(ctx, run, "stopped by "+author); err != nil {
+	if err := a.stopOrchestrationRun(ctx, run, "stopped", "stopped by "+author); err != nil {
 		log.Error("cannot stop the run", "run_id", id, logkey.Error, err)
 		return JSONProblemf(c, http.StatusInternalServerError, "cannot stop run %d", id)
 	}
@@ -209,10 +209,11 @@ func (a *Api) PostOrchestrationRunStop(c echo.Context, id server.InPathOrchestra
 	return a.writeOrchestrationRun(c, log, id)
 }
 
-// stopOrchestrationRun stops a run: the actions of its step still waiting in the
-// queue cancelled, its targets not started and the next steps not run. The
-// actions an agent took go on; the engine records their results.
-func (a *Api) stopOrchestrationRun(ctx context.Context, run *cdb.OrchestrationRun, message string) error {
+// stopOrchestrationRun stops a run, ending as status (stopped or cancelled): the
+// actions of its step still waiting in the queue cancelled, its targets not
+// started and the next steps not run. The actions an agent took go on; the
+// engine records their results.
+func (a *Api) stopOrchestrationRun(ctx context.Context, run *cdb.OrchestrationRun, status, message string) error {
 	odb := a.ODB
 	targets, err := odb.OrchestrationRunTargets(ctx, run.ID, run.CurrentStep)
 	if err != nil {
@@ -241,7 +242,57 @@ func (a *Api) stopOrchestrationRun(ctx context.Context, run *cdb.OrchestrationRu
 	if err := odb.SetOrchestrationRunStepsFrom(ctx, run.ID, run.CurrentStep+1, "not_run"); err != nil {
 		return err
 	}
-	return odb.SetOrchestrationRun(ctx, run.ID, "stopped", run.CurrentStep, message)
+	return odb.SetOrchestrationRun(ctx, run.ID, status, run.CurrentStep, message)
+}
+
+// PostOrchestrationRunCancel handles POST /orchestration_runs/{run_id}/cancel: a
+// run stopped for good. A running one stops as POST .../stop does; a failed or
+// stopped one ends there. Either way, it neither resumes nor goes on past its
+// step: resume and continue accept a failed or stopped run only.
+func (a *Api) PostOrchestrationRunCancel(c echo.Context, id server.InPathOrchestrationRunId) error {
+	log := echolog.GetLogHandler(c, "PostOrchestrationRunCancel")
+	if err := requireManager(c); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(c.Request().Context(), a.SyncTimeout)
+	defer cancel()
+	odb := a.ODB
+	run, err := odb.OrchestrationRunByID(ctx, id)
+	if err != nil {
+		log.Error("cannot read the run", "run_id", id, logkey.Error, err)
+		return JSONProblemf(c, http.StatusInternalServerError, "cannot read run %d", id)
+	}
+	if run == nil {
+		return JSONProblemf(c, http.StatusNotFound, "run %d not found", id)
+	}
+	author, _ := c.Get(XUserEmail).(string)
+	message := "cancelled by " + author
+	switch run.Status {
+	case "running":
+		err = a.stopOrchestrationRun(ctx, run, "cancelled", message)
+	case "failed", "stopped":
+		// What ended the run stays said, the cancellation after it.
+		if run.Message != "" {
+			message = run.Message + "; " + message
+		}
+		err = odb.SetOrchestrationRun(ctx, run.ID, "cancelled", run.CurrentStep, message)
+	default:
+		return JSONProblemf(c, http.StatusConflict, "run %d is %s: only a running, failed or stopped run is cancelled", id, run.Status)
+	}
+	if err != nil {
+		log.Error("cannot cancel the run", "run_id", id, logkey.Error, err)
+		return JSONProblemf(c, http.StatusInternalServerError, "cannot cancel run %d", id)
+	}
+	if err := odb.Log(ctx, cdb.LogEntry{
+		Action: "orchestration.cancel", User: author, Fmt: "cancelled run %(run_id)s of orchestration %(name)s",
+		Dict: map[string]any{"name": run.Name, "run_id": id}, Level: "info",
+	}); err != nil {
+		log.Error("cannot write audit log", logkey.Error, err)
+	}
+	if err := odb.Session.NotifyChanges(ctx); err != nil {
+		log.Debug("cannot notify changes", logkey.Error, err)
+	}
+	return a.writeOrchestrationRun(c, log, id)
 }
 
 // PostOrchestrationRunResume handles POST /orchestration_runs/{run_id}/resume.

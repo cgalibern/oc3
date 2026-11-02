@@ -772,6 +772,7 @@ func (e ObsolescenceSettingRowObsType) Valid() bool {
 
 // Defines values for OrchestrationRunStatus.
 const (
+	OrchestrationRunStatusCancelled OrchestrationRunStatus = "cancelled"
 	OrchestrationRunStatusFailed    OrchestrationRunStatus = "failed"
 	OrchestrationRunStatusRunning   OrchestrationRunStatus = "running"
 	OrchestrationRunStatusStopped   OrchestrationRunStatus = "stopped"
@@ -781,6 +782,8 @@ const (
 // Valid indicates whether the value is a known member of the OrchestrationRunStatus enum.
 func (e OrchestrationRunStatus) Valid() bool {
 	switch e {
+	case OrchestrationRunStatusCancelled:
+		return true
 	case OrchestrationRunStatusFailed:
 		return true
 	case OrchestrationRunStatusRunning:
@@ -4987,11 +4990,15 @@ type OrchestrationRun struct {
 	OrchestrationId *int `json:"orchestration_id,omitempty"`
 
 	// Plan The steps of the orchestration when the run started
-	Plan      []OrchestrationStep    `json:"plan"`
-	Started   string                 `json:"started"`
-	StartedBy string                 `json:"started_by"`
-	Status    OrchestrationRunStatus `json:"status"`
-	Steps     []OrchestrationRunStep `json:"steps"`
+	Plan      []OrchestrationStep `json:"plan"`
+	Started   string              `json:"started"`
+	StartedBy string              `json:"started_by"`
+
+	// Status cancelled: the run was stopped for good, while running or after it failed
+	// or was stopped: it neither resumes nor goes on (see POST
+	// /orchestration_runs/{run_id}/cancel).
+	Status OrchestrationRunStatus `json:"status"`
+	Steps  []OrchestrationRunStep `json:"steps"`
 }
 
 // OrchestrationRunContinueInput defines model for OrchestrationRunContinueInput.
@@ -5040,7 +5047,9 @@ type OrchestrationRunRow struct {
 	StepsDone *int `json:"steps_done,omitempty"`
 }
 
-// OrchestrationRunStatus defines model for OrchestrationRunStatus.
+// OrchestrationRunStatus cancelled: the run was stopped for good, while running or after it failed
+// or was stopped: it neither resumes nor goes on (see POST
+// /orchestration_runs/{run_id}/cancel).
 type OrchestrationRunStatus string
 
 // OrchestrationRunStep defines model for OrchestrationRunStep.
