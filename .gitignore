@@ -18,3 +18,6 @@
 core/version/version.go
 .trash
 .claude
+!tools/agent-sim/*
+tools/agent-sim/capture/
+tools/agent-sim/results/
