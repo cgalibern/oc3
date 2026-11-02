@@ -105,7 +105,8 @@ paths:
         switch, abort, clear, freeze and thaw on a service; the same, and restart,
         takeover, syncall, syncnodes, syncdrp, enable, disable, compliance_check
         and compliance_fix (CompExec privilege, on every module attached to the
-        service) on an instance or on its resources; pushasset, pushdisks, pushpkg, pushpatch, pushstats,
+        service) on an instance or on its resources, and "freeze --slaves" and
+        "thaw --slaves" on the encapsulated slaves of an instance; pushasset, pushdisks, pushpkg, pushpatch, pushstats,
         checks, sysreport, updatecomp, updatepkg, scanscsi,
         reboot, schedule_reboot, unschedule_reboot, shutdown, drain,
         compliance_check, compliance_fix (on every module attached to the node),

@@ -55,6 +55,18 @@ var instanceActions = map[string]bool{
 	"thaw":             true,
 	"compliance_check": true,
 	"compliance_fix":   true,
+	// The encapsulated slaves of the instance only, as the historical collector
+	// queued them from a form ("<action> --slaves"): see encapActions.
+	"freeze --slaves": true,
+	"thaw --slaves":   true,
+}
+
+// encapActions are the instance actions on the encapsulated slaves, by action:
+// the om3 agent runs them as an instance action, which takes --slaves where the
+// object freeze and thaw it maps the historical ones to do not.
+var encapActions = map[string]string{
+	"freeze --slaves": "instance freeze --slaves",
+	"thaw --slaves":   "instance unfreeze --slaves",
 }
 
 // ridPattern bounds a resource id list ("fs#1,ip#0"): the command reaches a push
@@ -78,6 +90,14 @@ func agentAtLeast19(version string) bool {
 	return v >= 1.9
 }
 
+// agentOM3 reports whether the agent is an om3 one, which reports "v3.0.0-...".
+func agentOM3(version string) bool {
+	version = strings.TrimPrefix(strings.TrimPrefix(version, "v"), "V")
+	major, _, _ := strings.Cut(version, ".")
+	n, err := strconv.Atoi(major)
+	return err == nil && n >= 3
+}
+
 // serviceActionCommand builds the queued command, as fmt_svc_action() does. A pull
 // or feed node reads the bare action from its queue; a push node is reached over
 // ssh. A resource id limits the action to those resources; otherwise `local`
@@ -93,6 +113,14 @@ func serviceActionCommand(action, svcname, actionType, connectTo, agentVersion, 
 		// A compliance run, on the modules attached to the service, as
 		// fmt_svc_comp_action() builds it: never limited to an instance.
 		cmd = append(cmd, words...)
+		return strings.Join(cmd, " ")
+	}
+	if words, ok := encapActions[action]; ok && agentOM3(agentVersion) {
+		// An om3 instance action runs on the node it is queued for: no --local.
+		cmd = append(cmd, words)
+		if rid != "" {
+			cmd = append(cmd, "--rid", rid)
+		}
 		return strings.Join(cmd, " ")
 	}
 	cmd = append(cmd, action)
