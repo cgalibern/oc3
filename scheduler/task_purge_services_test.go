@@ -1,6 +1,10 @@
 package scheduler
 
 import (
+	"context"
+	"errors"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -55,5 +59,38 @@ func TestValidateMaxAgesPurgeServicesDisabled(t *testing.T) {
 	viper.Set(other, "0")
 	if err := ValidateMaxAges(); err == nil {
 		t.Errorf("scrub_object max_age %q: no error", "0")
+	}
+}
+
+// TestDeleteServicesByBatch checks the services are deleted by batches of the
+// size, a failed batch is not counted and does not stop the next ones, and no
+// batch is started once the context is done.
+func TestDeleteServicesByBatch(t *testing.T) {
+	ids := []string{"a", "b", "c", "d", "e"}
+	var batches [][]string
+	del := func(_ context.Context, batch []string) error {
+		batches = append(batches, slices.Clone(batch))
+		if batch[0] == "c" {
+			return errors.New("lock wait timeout")
+		}
+		return nil
+	}
+	purged, err := deleteServicesByBatch(context.Background(), ids, 2, del)
+	if want := [][]string{{"a", "b"}, {"c", "d"}, {"e"}}; !slices.EqualFunc(batches, want, slices.Equal[[]string]) {
+		t.Errorf("batches %v, want %v", batches, want)
+	}
+	if purged != 3 {
+		t.Errorf("purged %d, want 3", purged)
+	}
+	if err == nil || !strings.Contains(err.Error(), "[c d]") {
+		t.Errorf("err %v, want the failed batch", err)
+	}
+
+	batches = nil
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	purged, err = deleteServicesByBatch(ctx, ids, 2, del)
+	if len(batches) != 0 || purged != 0 || !errors.Is(err, context.Canceled) {
+		t.Errorf("done context: batches %v, purged %d, err %v", batches, purged, err)
 	}
 }

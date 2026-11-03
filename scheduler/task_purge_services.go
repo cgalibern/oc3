@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/spf13/viper"
@@ -42,6 +43,38 @@ func purgeServicesMaxAge() (time.Duration, error) {
 	return parseMaxAgeKey(key)
 }
 
+// purgeServicesDeleteBatch is the count of services deleted together, by a
+// statement per table: each statement commits alone, so a service at a time
+// cost a commit per table and service, too slow to purge the candidates within
+// the period. A bigger batch would make long deletions on the large tables.
+const purgeServicesDeleteBatch = 100
+
+// purgeServicesLogOrphansMinAge is the age of the end of the status log of a
+// service gone, after which the log is purged: a service being created may
+// have its log written before its services row.
+const purgeServicesLogOrphansMinAge = time.Hour
+
+// deleteServicesByBatch deletes the services ids by batches of size with del,
+// and returns the count of services deleted. A batch failing is reported and
+// the next ones are deleted; none is started once ctx is done.
+func deleteServicesByBatch(ctx context.Context, ids []string, size int, del func(context.Context, []string) error) (int, error) {
+	var (
+		purged int
+		err    error
+	)
+	for batch := range slices.Chunk(ids, size) {
+		if ctx.Err() != nil {
+			return purged, errors.Join(err, ctx.Err())
+		}
+		if err1 := del(ctx, batch); err1 != nil {
+			err = errors.Join(err, fmt.Errorf("purge services %v: %w", batch, err1))
+			continue
+		}
+		purged += len(batch)
+	}
+	return purged, err
+}
+
 func taskPurgeServices(ctx context.Context, task *Task) error {
 	odb := task.DB()
 	age, err := purgeServicesMaxAge()
@@ -56,23 +89,16 @@ func taskPurgeServices(ctx context.Context, task *Task) error {
 	if err != nil {
 		return err
 	}
-	var purged int
-	for _, id := range ids {
-		if ctx.Err() != nil {
-			err = errors.Join(err, ctx.Err())
-			break
-		}
-		if err1 := odb.DeleteServiceCascade(ctx, id); err1 != nil {
-			err = errors.Join(err, fmt.Errorf("purge service %s: %w", id, err1))
-			continue
-		}
-		purged++
-	}
+	purged, err := deleteServicesByBatch(ctx, ids, purgeServicesDeleteBatch, odb.DeleteServicesCascade)
 	orphanTags, err1 := odb.PurgeOrphanServiceTags(ctx)
 	if err1 != nil {
 		err = errors.Join(err, err1)
 	}
-	task.Infof("max_age: %s. batch size: %d. candidates: %d. purged services: %d. orphan tags deleted: %d", age, batchSize, len(ids), purged, orphanTags)
+	orphanLogs, err1 := odb.PurgeServicesLogOrphans(ctx, purgeServicesLogOrphansMinAge)
+	if err1 != nil {
+		err = errors.Join(err, err1)
+	}
+	task.Infof("max_age: %s. batch size: %d. candidates: %d. purged services: %d. orphan tags deleted: %d. orphan status logs deleted: %d", age, batchSize, len(ids), purged, orphanTags, orphanLogs)
 	if err1 := odb.Session.NotifyChanges(ctx); err1 != nil {
 		err = errors.Join(err, err1)
 	}
