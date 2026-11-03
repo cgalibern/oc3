@@ -322,15 +322,27 @@ func parseMaxAgeKey(key string) (time.Duration, error) {
 	return d, nil
 }
 
+// maxAgeParsers are the parsers of the max_age settings not parsed by
+// parseMaxAgeKey, the task accepting other values, like 0 disabling the
+// purge_services age based purge, its default.
+var maxAgeParsers = map[string]func() (time.Duration, error){
+	"scheduler.task.purge_services.max_age": purgeServicesMaxAge,
+}
+
 // ValidateMaxAges verifies all the scheduler.task.<name>.max_age settings,
-// so a bad value is reported at startup instead of when the task runs.
+// so a bad value is reported at startup instead of when the task runs. Each
+// setting is verified by the parser of its task.
 func ValidateMaxAges() error {
 	var errs []error
 	for _, key := range viper.AllKeys() {
 		if !strings.HasPrefix(key, "scheduler.task.") || !strings.HasSuffix(key, ".max_age") {
 			continue
 		}
-		if _, err := parseMaxAgeKey(key); err != nil {
+		parse := func() (time.Duration, error) { return parseMaxAgeKey(key) }
+		if p, ok := maxAgeParsers[key]; ok {
+			parse = p
+		}
+		if _, err := parse(); err != nil {
 			errs = append(errs, err)
 		}
 	}
