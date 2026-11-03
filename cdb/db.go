@@ -196,11 +196,20 @@ func (oDb *DB) SetChange(s ...string) {
 	oDb.Session.SetChanges(s...)
 }
 
-func (oDb *DB) DeleteBatched(ctx context.Context, table, dateCol, orderbyCol string, batchSize int64, retention int, where string) (totalDeleted int64, batchCount int64, err error) {
-	// The base SQL query for the batched deletion.
-	// ORDER BY is crucial for consistent performance and avoiding lock conflicts.
+// DeleteBatched deletes, by batches of batchSize rows, the rows of table
+// whose dateCol is older than retention days.
+//
+// The rows are deleted in dateCol order, oldest first. Ordering on the
+// filtered column matters: dateCol is indexed on the tables this is used
+// on, so each batch reads and locks batchSize rows of that index and stops.
+// Ordering on another column, as the primary key, makes the server read
+// and lock every row older than the retention to sort them before
+// applying the LIMIT: on a backlog of a few million rows each batch then
+// holds a lock on all of them for seconds, and the feeds writing to the
+// table time out on lock waits.
+func (oDb *DB) DeleteBatched(ctx context.Context, table, dateCol string, batchSize int64, retention int, where string) (totalDeleted int64, batchCount int64, err error) {
 	query := fmt.Sprintf("DELETE FROM `%s` WHERE `%s` < DATE_SUB(NOW(), INTERVAL %d DAY) %s ORDER BY `%s` LIMIT %d",
-		table, dateCol, retention, where, orderbyCol, batchSize)
+		table, dateCol, retention, where, dateCol, batchSize)
 
 	for {
 		batchCount++

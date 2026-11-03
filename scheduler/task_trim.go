@@ -17,12 +17,12 @@ var TaskTrim = Task{
 }
 
 // deleteBatched executes the deletion query in batches until no rows are affected.
-func deleteBatched(ctx context.Context, task *Task, table, dateCol, orderbyCol, where string) error {
+func deleteBatched(ctx context.Context, task *Task, table, dateCol, where string) error {
 	batchSize := getBatchSize(table)
 	retention := getRetentionDays(table)
 	odb := task.DB()
 
-	totalDeleted, batchCount, err := odb.DeleteBatched(ctx, table, dateCol, orderbyCol, batchSize, retention, where)
+	totalDeleted, batchCount, err := odb.DeleteBatched(ctx, table, dateCol, batchSize, retention, where)
 	if err != nil {
 		return err
 	}
@@ -48,26 +48,26 @@ func getRetentionDays(table string) int {
 }
 
 func taskTrimRun(ctx context.Context, task *Task) (err error) {
-	err = errors.Join(err, deleteBatched(ctx, task, "saves", "save_date", "id", ""))
-	err = errors.Join(err, deleteBatched(ctx, task, "log", "log_date", "id", ""))
-	err = errors.Join(err, deleteBatched(ctx, task, "stat_day_disk_array", "day", "id", ""))
-	err = errors.Join(err, deleteBatched(ctx, task, "stat_day_disk_array_dg", "day", "id", ""))
-	err = errors.Join(err, deleteBatched(ctx, task, "stat_day_disk_app", "day", "id", ""))
-	err = errors.Join(err, deleteBatched(ctx, task, "stat_day_disk_app_dg", "day", "id", ""))
-	err = errors.Join(err, deleteBatched(ctx, task, "switches", "sw_updated", "id", ""))
-	err = errors.Join(err, deleteBatched(ctx, task, "comp_log", "run_date", "id", ""))
-	err = errors.Join(err, deleteBatched(ctx, task, "comp_log_daily", "run_date", "id", ""))
-	err = errors.Join(err, deleteBatched(ctx, task, "resmon_log", "res_end", "id", ""))
-	err = errors.Join(err, deleteBatched(ctx, task, "svcmon_log", "mon_end", "id", ""))
-	err = errors.Join(err, deleteBatched(ctx, task, "svcactions", "begin", "id", ""))
-	err = errors.Join(err, deleteBatched(ctx, task, "dashboard_events", "dash_end", "id", "AND NOT `dash_end` IS NULL"))
-	err = errors.Join(err, deleteBatched(ctx, task, "packages", "pkg_updated", "id", ""))
-	err = errors.Join(err, deleteBatched(ctx, task, "patches", "patch_updated", "id", ""))
-	err = errors.Join(err, deleteBatched(ctx, task, "node_ip", "updated", "id", ""))
-	err = errors.Join(err, deleteBatched(ctx, task, "node_users", "updated", "id", ""))
-	err = errors.Join(err, deleteBatched(ctx, task, "node_groups", "updated", "id", ""))
-	err = errors.Join(err, deleteBatched(ctx, task, "comp_run_ruleset", "date", "id", ""))
-	err = errors.Join(err, deleteBatched(ctx, task, "links", "link_last_consultation_date", "id", ""))
-	err = errors.Join(err, deleteBatched(ctx, task, "services_log", "svc_end", "id", ""))
+	err = errors.Join(err, deleteBatched(ctx, task, "saves", "save_date", ""))
+	err = errors.Join(err, deleteBatched(ctx, task, "log", "log_date", ""))
+	err = errors.Join(err, deleteBatched(ctx, task, "stat_day_disk_array", "day", ""))
+	err = errors.Join(err, deleteBatched(ctx, task, "stat_day_disk_array_dg", "day", ""))
+	err = errors.Join(err, deleteBatched(ctx, task, "stat_day_disk_app", "day", ""))
+	err = errors.Join(err, deleteBatched(ctx, task, "stat_day_disk_app_dg", "day", ""))
+	err = errors.Join(err, deleteBatched(ctx, task, "switches", "sw_updated", ""))
+	err = errors.Join(err, deleteBatched(ctx, task, "comp_log", "run_date", ""))
+	err = errors.Join(err, deleteBatched(ctx, task, "comp_log_daily", "run_date", ""))
+	err = errors.Join(err, deleteBatched(ctx, task, "resmon_log", "res_end", ""))
+	err = errors.Join(err, deleteBatched(ctx, task, "svcmon_log", "mon_end", ""))
+	err = errors.Join(err, deleteBatched(ctx, task, "svcactions", "begin", ""))
+	err = errors.Join(err, deleteBatched(ctx, task, "dashboard_events", "dash_end", "AND NOT `dash_end` IS NULL"))
+	err = errors.Join(err, deleteBatched(ctx, task, "packages", "pkg_updated", ""))
+	err = errors.Join(err, deleteBatched(ctx, task, "patches", "patch_updated", ""))
+	err = errors.Join(err, deleteBatched(ctx, task, "node_ip", "updated", ""))
+	err = errors.Join(err, deleteBatched(ctx, task, "node_users", "updated", ""))
+	err = errors.Join(err, deleteBatched(ctx, task, "node_groups", "updated", ""))
+	err = errors.Join(err, deleteBatched(ctx, task, "comp_run_ruleset", "date", ""))
+	err = errors.Join(err, deleteBatched(ctx, task, "links", "link_last_consultation_date", ""))
+	err = errors.Join(err, deleteBatched(ctx, task, "services_log", "svc_end", ""))
 	return
 }
