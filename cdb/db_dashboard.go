@@ -420,15 +420,9 @@ func (oDb *DB) DashboardInstanceFrozenUpdate(ctx context.Context, objectID, node
 			  AND svc_id = ?
 			  AND node_id = ?
 			`
-		queryFrozen = `
-			INSERT INTO dashboard
-			SET
-              dash_type = 'service frozen', svc_id = ?, node_id = ?,
-              dash_severity = 1, dash_fmt='', dash_dict='',
-			  dash_created = NOW(), dash_updated = NOW(), dash_env = ?
-		    ON DUPLICATE KEY UPDATE
-			  dash_severity = 1, dash_fmt = '', dash_dict = '',
-			  dash_updated = NOW(), dash_env = ?`
+		sourceFrozen = `SELECT 'service frozen' AS dash_type, ? AS svc_id, ? AS node_id,
+			1 AS dash_severity, '' AS dash_fmt, '' AS dash_dict,
+			NOW() AS dash_created, NOW() AS dash_updated, ? AS dash_env`
 	)
 	var (
 		err   error
@@ -436,7 +430,12 @@ func (oDb *DB) DashboardInstanceFrozenUpdate(ctx context.Context, objectID, node
 	)
 	switch frozen {
 	case true:
-		count, err = oDb.execCountContext(ctx, queryFrozen, objectID, nodeID, objectEnv, objectEnv)
+		count, err = oDb.upsertAlerts(ctx, alertsUpsert{
+			source:  sourceFrozen,
+			args:    []any{objectID, nodeID, objectEnv},
+			columns: []string{"dash_type", "svc_id", "node_id", "dash_severity", "dash_fmt", "dash_dict", "dash_created", "dash_updated", "dash_env"},
+			update:  []string{"dash_severity = s.dash_severity", "dash_fmt = s.dash_fmt", "dash_dict = s.dash_dict", "dash_updated = s.dash_updated", "dash_env = s.dash_env"},
+		})
 		if err != nil {
 			return fmt.Errorf("update dashboard 'service frozen' for %s@%s: %w", objectID, nodeID, err)
 		}
@@ -532,28 +531,26 @@ func (oDb *DB) ObjectInAckUnavailabilityPeriod(ctx context.Context, l ...string)
 // dashboardUpdateObject delete "service unavailable" alerts.
 func (oDb *DB) DashboardUpdateObject(ctx context.Context, l ...*Dashboard) error {
 	defer logDuration("DashboardUpdateObject", time.Now())
-	const (
-		insertColList         = "(`svc_id`, `dash_type`, `dash_fmt`, `dash_severity`, `dash_dict`, `dash_created`, `dash_updated`, `dash_env`)"
-		valueList             = "(?, ?, ?, ?, ?, NOW(), NOW(), ?)"
-		onDuplicateAssignment = "" +
-			"`dash_fmt`=VALUES(`dash_fmt`), `dash_severity`=VALUES(`dash_severity`), `dash_dict`=VALUES(`dash_dict`), " + "" +
-			"`dash_updated`=VALUES(`dash_updated`), `dash_env`=VALUES(`dash_env`)"
-	)
 	if len(l) == 0 {
 		return nil
 	}
-	placeholders := strings.Repeat(valueList+", ", len(l)-1) + valueList
-
-	query := fmt.Sprintf("INSERT INTO `dashboard` %s VALUES %s ON DUPLICATE KEY UPDATE %s", insertColList, placeholders, onDuplicateAssignment)
-	args := make([]any, 0, 6*len(l))
-	for _, v := range l {
-		args = append(args, v.ObjectID, v.Type, v.Fmt, v.Severity, v.Dict, v.Env)
+	rows := make([][]any, len(l))
+	for i, v := range l {
+		rows[i] = []any{v.ObjectID, v.Type, v.Fmt, v.Severity, v.Dict, v.Env}
 	}
-
-	if _, err := oDb.ExecContext(ctx, query, args...); err != nil {
+	given, args := givenRows([]string{"svc_id", "dash_type", "dash_fmt", "dash_severity", "dash_dict", "dash_env"}, rows)
+	count, err := oDb.upsertAlerts(ctx, alertsUpsert{
+		source:  "SELECT r.*, NOW() AS dash_created, NOW() AS dash_updated FROM (" + given + ") r",
+		args:    args,
+		columns: []string{"svc_id", "dash_type", "dash_fmt", "dash_severity", "dash_dict", "dash_env", "dash_created", "dash_updated"},
+		update:  []string{"dash_fmt = s.dash_fmt", "dash_severity = s.dash_severity", "dash_dict = s.dash_dict", "dash_updated = s.dash_updated", "dash_env = s.dash_env"},
+	})
+	if err != nil {
 		return err
 	}
-	oDb.SetChange("dashboard")
+	if count > 0 {
+		oDb.SetChange("dashboard")
+	}
 	return nil
 }
 
@@ -646,26 +643,26 @@ func (oDb *DB) PurgeAlertsOnDeletedServices(ctx context.Context) error {
 }
 
 func (oDb *DB) DashboardUpdateNodesNotUpdated(ctx context.Context, maxAge time.Duration) error {
-	request := `INSERT INTO dashboard
-               SELECT
-                 NULL,
-                 "node information not updated",
-                 "",
-                 0,
-                 "",
-                 "",
-                 updated,
-                 "",
-                 node_env,
-                 NOW(),
+	u := alertsUpsert{
+		source: `SELECT
+                 "node information not updated" AS dash_type,
+                 "" AS svc_id,
+                 0 AS dash_severity,
+                 "" AS dash_fmt,
+                 "" AS dash_dict,
+                 updated AS dash_created,
+                 "" AS dash_dict_md5,
+                 node_env AS dash_env,
+                 NOW() AS dash_updated,
                  node_id,
-                 NULL,
-                 NULL
+                 NULL AS dash_instance
                FROM nodes
-               WHERE updated < date_sub(NOW(), INTERVAL ? SECOND)
-               ON DUPLICATE KEY UPDATE
-                 dash_updated=NOW()`
-	if count, err := oDb.execCountContext(ctx, request, maxAgeSeconds(maxAge)); err != nil {
+               WHERE updated < date_sub(NOW(), INTERVAL ? SECOND)`,
+		args:    []any{maxAgeSeconds(maxAge)},
+		columns: positionalAlertColumns,
+		update:  []string{"dash_updated = s.dash_updated"},
+	}
+	if count, err := oDb.upsertAlerts(ctx, u); err != nil {
 		return err
 	} else if count > 0 {
 		oDb.SetChange("dashboard")
@@ -715,28 +712,28 @@ func (oDb *DB) DashboardUpdateChecksNotUpdated(ctx context.Context, maxAge time.
 	} else if count > 0 {
 		oDb.SetChange("dashboard")
 	}
-	request = `
-	INSERT INTO dashboard
+	u := alertsUpsert{
+		source: `
 	SELECT
-	    NULL,
-	    "check value not updated",
-	    "",
-	    IF(n.node_env = "PRD", 1, 0),
-	    "%(t)s:%(i)s",
-	    CONCAT('{"i":"', chk_instance, '", "t":"', chk_type, '"}'),
-	    chk_updated,
-	    MD5(CONCAT('{"i":"', chk_instance, '", "t":"', chk_type, '"}')),
-	    n.node_env,
-	    NOW(),
-	    c.node_id,
-	    NULL,
-	    CONCAT(chk_type, ":", chk_instance)
+	    "check value not updated" AS dash_type,
+	    "" AS svc_id,
+	    IF(n.node_env = "PRD", 1, 0) AS dash_severity,
+	    "%(t)s:%(i)s" AS dash_fmt,
+	    CONCAT('{"i":"', chk_instance, '", "t":"', chk_type, '"}') AS dash_dict,
+	    chk_updated AS dash_created,
+	    MD5(CONCAT('{"i":"', chk_instance, '", "t":"', chk_type, '"}')) AS dash_dict_md5,
+	    n.node_env AS dash_env,
+	    NOW() AS dash_updated,
+	    c.node_id AS node_id,
+	    CONCAT(chk_type, ":", chk_instance) AS dash_instance
 	FROM checks_live c
 	JOIN nodes n ON c.node_id = n.node_id
-	WHERE chk_updated < DATE_SUB(NOW(), INTERVAL ? SECOND)
-	ON DUPLICATE KEY UPDATE dash_updated = NOW();
-	`
-	if count, err := oDb.execCountContext(ctx, request, maxAgeSeconds(maxAge)); err != nil {
+	WHERE chk_updated < DATE_SUB(NOW(), INTERVAL ? SECOND)`,
+		args:    []any{maxAgeSeconds(maxAge)},
+		columns: positionalAlertColumns,
+		update:  []string{"dash_updated = s.dash_updated"},
+	}
+	if count, err := oDb.upsertAlerts(ctx, u); err != nil {
 		return err
 	} else if count > 0 {
 		oDb.SetChange("dashboard")
@@ -756,24 +753,22 @@ func (oDb *DB) AlertActionErrors(ctx context.Context, line BActionErrorCount) er
 		env = "TST"
 		severity = 3
 	}
-	request := `
-                 INSERT INTO dashboard
-                 SET
-                   dash_type="action errors",
-                   svc_id=?,
-                   node_id=?,
-                   dash_severity=?,
-                   dash_fmt="%(err)s action errors",
-                   dash_dict=CONCAT('{"err": "', ?, '"}'),
-                   dash_created=NOW(),
-                   dash_env=?,
-                   dash_updated=NOW()
-                 ON DUPLICATE KEY UPDATE
-                   dash_severity=?,
-                   dash_fmt="%(err)s action errors",
-                   dash_dict=CONCAT('{"err": "', ?, '"}'),
-                   dash_updated=NOW()`
-	if count, err := oDb.execCountContext(ctx, request, line.SvcID, line.NodeID, severity, line.ErrCount, env, severity, line.ErrCount); err != nil {
+	u := alertsUpsert{
+		source: `SELECT
+                   "action errors" AS dash_type,
+                   ? AS svc_id,
+                   ? AS node_id,
+                   ? AS dash_severity,
+                   "%(err)s action errors" AS dash_fmt,
+                   CONCAT('{"err": "', ?, '"}') AS dash_dict,
+                   NOW() AS dash_created,
+                   ? AS dash_env,
+                   NOW() AS dash_updated`,
+		args:    []any{line.SvcID, line.NodeID, severity, line.ErrCount, env},
+		columns: []string{"dash_type", "svc_id", "node_id", "dash_severity", "dash_fmt", "dash_dict", "dash_created", "dash_env", "dash_updated"},
+		update:  []string{"dash_severity = s.dash_severity", "dash_fmt = s.dash_fmt", "dash_dict = s.dash_dict", "dash_updated = s.dash_updated"},
+	}
+	if count, err := oDb.upsertAlerts(ctx, u); err != nil {
 		return err
 	} else if count > 0 {
 		oDb.SetChange("dashboard")
@@ -797,28 +792,26 @@ func (oDb *DB) DashboardDeleteActionErrorsWithNoError(ctx context.Context) error
 }
 
 func (oDb *DB) DashboardUpdateServiceConfigNotUpdated(ctx context.Context, maxAge time.Duration) error {
-	request := `
-	     INSERT INTO dashboard
-             SELECT
-               NULL,
-               "service configuration not updated",
+	u := alertsUpsert{
+		source: `SELECT
+               "service configuration not updated" AS dash_type,
                svc_id,
-               IF(svc_env="PRD", 1, 0),
-               "",
-               "",
-               updated,
-               "",
-               svc_env,
-               NOW(),
-               "",
-               NULL,
-               NULL
+               IF(svc_env="PRD", 1, 0) AS dash_severity,
+               "" AS dash_fmt,
+               "" AS dash_dict,
+               updated AS dash_created,
+               "" AS dash_dict_md5,
+               svc_env AS dash_env,
+               NOW() AS dash_updated,
+               "" AS node_id,
+               NULL AS dash_instance
              FROM services
-             WHERE updated < DATE_SUB(NOW(), INTERVAL ? SECOND)
-             ON DUPLICATE KEY UPDATE
-               dash_updated=NOW()
-	`
-	if count, err := oDb.execCountContext(ctx, request, maxAgeSeconds(maxAge)); err != nil {
+             WHERE updated < DATE_SUB(NOW(), INTERVAL ? SECOND)`,
+		args:    []any{maxAgeSeconds(maxAge)},
+		columns: positionalAlertColumns,
+		update:  []string{"dash_updated = s.dash_updated"},
+	}
+	if count, err := oDb.upsertAlerts(ctx, u); err != nil {
 		return err
 	} else if count > 0 {
 		oDb.SetChange("dashboard")
@@ -827,34 +820,32 @@ func (oDb *DB) DashboardUpdateServiceConfigNotUpdated(ctx context.Context, maxAg
 }
 
 func (oDb *DB) DashboardUpdateInstancesNotUpdated(ctx context.Context, maxAge time.Duration) error {
-	request := `
-		INSERT INTO dashboard
-		SELECT
-		  NULL,
-		  "service status not updated",
+	u := alertsUpsert{
+		source: `SELECT
+		  "service status not updated" AS dash_type,
 		  svc_id,
-		  IF(mon_svctype="PRD", 1, 0),
-		  "",
-		  "",
-		  mon_updated,
-		  "",
-		  mon_svctype,
-		  NOW(),
+		  IF(mon_svctype="PRD", 1, 0) AS dash_severity,
+		  "" AS dash_fmt,
+		  "" AS dash_dict,
+		  mon_updated AS dash_created,
+		  "" AS dash_dict_md5,
+		  mon_svctype AS dash_env,
+		  NOW() AS dash_updated,
 		  node_id,
-		  NULL,
-		  NULL
+		  NULL AS dash_instance
 		FROM svcmon
-		WHERE mon_updated < DATE_SUB(NOW(), INTERVAL ? SECOND)
-		ON DUPLICATE KEY UPDATE
-		  dash_updated=NOW()
-	`
-	if count, err := oDb.execCountContext(ctx, request, maxAgeSeconds(maxAge)); err != nil {
+		WHERE mon_updated < DATE_SUB(NOW(), INTERVAL ? SECOND)`,
+		args:    []any{maxAgeSeconds(maxAge)},
+		columns: positionalAlertColumns,
+		update:  []string{"dash_updated = s.dash_updated"},
+	}
+	if count, err := oDb.upsertAlerts(ctx, u); err != nil {
 		return err
 	} else if count > 0 {
 		oDb.SetChange("dashboard")
 	}
 
-	request = `
+	request := `
 		DELETE FROM dashboard
 		WHERE id IN (
 		    SELECT dashboard.id
@@ -878,51 +869,51 @@ func (oDb *DB) DashboardUpdateInstancesNotUpdated(ctx context.Context, maxAge ti
 }
 
 func (oDb *DB) DashboardUpdateNodeMaintenanceExpired(ctx context.Context) error {
-	request := `SET @now = NOW()`
-	if _, err := oDb.ExecContext(ctx, request); err != nil {
+	// One instant for the alerts written and the purge of the others: an
+	// alert written in this run is not purged.
+	now, err := oDb.databaseNow(ctx)
+	if err != nil {
 		return err
 	}
 
-	request = `
-		INSERT INTO dashboard
-		SELECT
-		  NULL,
-                  "node maintenance expired",
-                  "",
-                  1,
-                  "",
-                  "",
-                  @now,
-                  "",
-                  node_env,
-                  @now,
-                  node_id,
-                  NULL,
-                  NULL
-                 FROM nodes
-                 WHERE
-                   maintenance_end IS NOT NULL AND
-                   maintenance_end != "0000-00-00 00:00:00" AND
-                   maintenance_end < @now
-		ON DUPLICATE KEY UPDATE
-		  dash_updated=@now
-	`
-	if count, err := oDb.execCountContext(ctx, request); err != nil {
+	u := alertsUpsert{
+		source: `SELECT
+		  "node maintenance expired" AS dash_type,
+		  "" AS svc_id,
+		  1 AS dash_severity,
+		  "" AS dash_fmt,
+		  "" AS dash_dict,
+		  ? AS dash_created,
+		  "" AS dash_dict_md5,
+		  node_env AS dash_env,
+		  ? AS dash_updated,
+		  node_id,
+		  NULL AS dash_instance
+		FROM nodes
+		WHERE
+		  maintenance_end IS NOT NULL AND
+		  maintenance_end != "0000-00-00 00:00:00" AND
+		  maintenance_end < ?`,
+		args:    []any{now, now, now},
+		columns: positionalAlertColumns,
+		update:  []string{"dash_updated = s.dash_updated"},
+	}
+	if count, err := oDb.upsertAlerts(ctx, u); err != nil {
 		return err
 	} else if count > 0 {
 		oDb.SetChange("dashboard")
 	}
 
-	request = `
+	request := `
 		DELETE FROM dashboard
 		WHERE
 		  dash_type="node maintenance expired" AND
 		  (
-		    dash_updated < @now or
+		    dash_updated < ? or
 		    dash_updated IS NULL
 		  )
 	`
-	if count, err := oDb.execCountContext(ctx, request); err != nil {
+	if count, err := oDb.execCountContext(ctx, request, now); err != nil {
 		return err
 	} else if count > 0 {
 		oDb.SetChange("dashboard")
@@ -931,52 +922,52 @@ func (oDb *DB) DashboardUpdateNodeMaintenanceExpired(ctx context.Context) error 
 }
 
 func (oDb *DB) DashboardUpdateNodeCloseToMaintenanceEnd(ctx context.Context) error {
-	request := `SET @now = NOW()`
-	if _, err := oDb.ExecContext(ctx, request); err != nil {
+	// One instant for the alerts written and the purge of the others: an
+	// alert written in this run is not purged.
+	now, err := oDb.databaseNow(ctx)
+	if err != nil {
 		return err
 	}
 
-	request = `
-		INSERT INTO dashboard
-		SELECT
-		  NULL,
-		  "node close to maintenance end",
-		  "",
-		  0,
-		  "",
-		  "",
-		  @now,
-		  "",
-		  node_env,
-		  @now,
+	u := alertsUpsert{
+		source: `SELECT
+		  "node close to maintenance end" AS dash_type,
+		  "" AS svc_id,
+		  0 AS dash_severity,
+		  "" AS dash_fmt,
+		  "" AS dash_dict,
+		  ? AS dash_created,
+		  "" AS dash_dict_md5,
+		  node_env AS dash_env,
+		  ? AS dash_updated,
 		  node_id,
-		  NULL,
-		  NULL
+		  NULL AS dash_instance
 		FROM nodes
 		WHERE
 		  maintenance_end IS NOT NULL AND
 		  maintenance_end != "0000-00-00 00:00:00" AND
-		  maintenance_end > DATE_SUB(@now, INTERVAL 30 DAY) AND
-		  maintenance_end > @now
-		ON DUPLICATE KEY UPDATE
-		  dash_updated=@now
-	`
-	if count, err := oDb.execCountContext(ctx, request); err != nil {
+		  maintenance_end > DATE_SUB(?, INTERVAL 30 DAY) AND
+		  maintenance_end > ?`,
+		args:    []any{now, now, now, now},
+		columns: positionalAlertColumns,
+		update:  []string{"dash_updated = s.dash_updated"},
+	}
+	if count, err := oDb.upsertAlerts(ctx, u); err != nil {
 		return err
 	} else if count > 0 {
 		oDb.SetChange("dashboard")
 	}
 
-	request = `
+	request := `
 		DELETE FROM dashboard
 		WHERE
 		  dash_type="node close to maintenance end" AND
 		  (
-		    dash_updated < @now or
+		    dash_updated < ? or
 		    dash_updated IS NULL
 		  )
 	`
-	if count, err := oDb.execCountContext(ctx, request); err != nil {
+	if count, err := oDb.execCountContext(ctx, request, now); err != nil {
 		return err
 	} else if count > 0 {
 		oDb.SetChange("dashboard")
@@ -985,56 +976,56 @@ func (oDb *DB) DashboardUpdateNodeCloseToMaintenanceEnd(ctx context.Context) err
 }
 
 func (oDb *DB) DashboardUpdateNodeWithoutMaintenanceEnd(ctx context.Context) error {
-	request := `SET @now = NOW()`
-	if _, err := oDb.ExecContext(ctx, request); err != nil {
+	// One instant for the alerts written and the purge of the others: an
+	// alert written in this run is not purged.
+	now, err := oDb.databaseNow(ctx)
+	if err != nil {
 		return err
 	}
 
-	request = `
-		INSERT INTO dashboard
-		SELECT
-		  NULL,
-		  "node without maintenance end date",
-		  "",
-		  0,
-		  "",
-		  "",
-		  @now,
-		  "",
-		  node_env,
-		  @now,
+	u := alertsUpsert{
+		source: `SELECT
+		  "node without maintenance end date" AS dash_type,
+		  "" AS svc_id,
+		  0 AS dash_severity,
+		  "" AS dash_fmt,
+		  "" AS dash_dict,
+		  ? AS dash_created,
+		  "" AS dash_dict_md5,
+		  node_env AS dash_env,
+		  ? AS dash_updated,
 		  node_id,
-		  NULL,
-		  NULL
+		  NULL AS dash_instance
 		FROM nodes
 		WHERE
                  (warranty_end IS NULL OR
                   warranty_end = "0000-00-00 00:00:00" OR
-                  warranty_end < @now) AND
+                  warranty_end < ?) AND
                  (maintenance_end IS NULL OR
                   maintenance_end = "0000-00-00 00:00:00") AND
                  model not like "%virt%" AND
                  model not like "%Not Specified%" AND
-                 model not like "%KVM%"
-		ON DUPLICATE KEY UPDATE
-		  dash_updated=@now
-	`
-	if count, err := oDb.execCountContext(ctx, request); err != nil {
+                 model not like "%KVM%"`,
+		args:    []any{now, now, now},
+		columns: positionalAlertColumns,
+		update:  []string{"dash_updated = s.dash_updated"},
+	}
+	if count, err := oDb.upsertAlerts(ctx, u); err != nil {
 		return err
 	} else if count > 0 {
 		oDb.SetChange("dashboard")
 	}
 
-	request = `
+	request := `
 		DELETE FROM dashboard
 		WHERE
 		  dash_type="node without maintenance end date" AND
 		  (
-		    dash_updated < @now or
+		    dash_updated < ? or
 		    dash_updated IS NULL
 		  )
 	`
-	if count, err := oDb.execCountContext(ctx, request); err != nil {
+	if count, err := oDb.execCountContext(ctx, request, now); err != nil {
 		return err
 	} else if count > 0 {
 		oDb.SetChange("dashboard")
@@ -1077,29 +1068,26 @@ func (oDb *DB) DashboardUpdateAppWithoutResponsible(ctx context.Context) error {
 		oDb.SetChange("dashboard")
 	}
 
-	request = `
-		INSERT INTO dashboard
-		SELECT
-		  NULL,
-		  "application code without responsible",
-		  "",
-		  2,
-		  "%(a)s",
-		  JSON_OBJECT("a", a.app),
-		  NOW(),
-		  MD5(JSON_OBJECT("a", a.app)),
-		  "",
-		  NOW(),
-		  "",
-		  NULL,
-		  a.app
+	u := alertsUpsert{
+		source: `SELECT
+		  "application code without responsible" AS dash_type,
+		  "" AS svc_id,
+		  2 AS dash_severity,
+		  "%(a)s" AS dash_fmt,
+		  JSON_OBJECT("a", a.app) AS dash_dict,
+		  NOW() AS dash_created,
+		  MD5(JSON_OBJECT("a", a.app)) AS dash_dict_md5,
+		  "" AS dash_env,
+		  NOW() AS dash_updated,
+		  "" AS node_id,
+		  a.app AS dash_instance
 		FROM apps a LEFT JOIN apps_responsibles ar ON a.id=ar.app_id
 		WHERE
-		  ar.group_id IS NULL
-		ON DUPLICATE KEY UPDATE
-		  dash_updated=NOW()
-	`
-	if count, err := oDb.execCountContext(ctx, request); err != nil {
+		  ar.group_id IS NULL`,
+		columns: positionalAlertColumns,
+		update:  []string{"dash_updated = s.dash_updated"},
+	}
+	if count, err := oDb.upsertAlerts(ctx, u); err != nil {
 		return err
 	} else if count > 0 {
 		oDb.SetChange("dashboard")
@@ -1108,8 +1096,9 @@ func (oDb *DB) DashboardUpdateAppWithoutResponsible(ctx context.Context) error {
 }
 
 func (oDb *DB) DashboardUpdatePkgDiffForNode(ctx context.Context, nodeID string) error {
-	request := `SET @now = NOW()`
-	_, err := oDb.ExecContext(ctx, request)
+	// One instant for the alerts written and the purge of the others: an
+	// alert written in this run is not purged.
+	now, err := oDb.databaseNow(ctx)
 	if err != nil {
 		return err
 	}
@@ -1231,32 +1220,23 @@ func (oDb *DB) DashboardUpdatePkgDiffForNode(ctx context.Context, nodeID string)
 
 		dashDictMD5 := fmt.Sprintf("%x", md5.Sum(dashDictJSON))
 
-		query = `
-			INSERT INTO dashboard
-			SET
-				dash_type = "package differences in cluster",
-				svc_id = ?,
-				node_id = "",
-				dash_severity = ?,
-				dash_fmt = "%(n)s package differences in cluster %(nodes)s",
-				dash_dict = ?,
-				dash_dict_md5 = ?,
-				dash_created = @now,
-				dash_updated = @now,
-				dash_env = ?
-			ON DUPLICATE KEY UPDATE
-				dash_severity = ?,
-				dash_fmt = "%(n)s package differences in cluster %(nodes)s",
-				dash_dict = ?,
-				dash_dict_md5 = ?,
-				dash_updated = @now,
-				dash_env = ?
-		`
-
-		_, err = oDb.ExecContext(ctx, query,
-			svcID, sev, dashDictJSON, dashDictMD5, monSvctype,
-			sev, dashDictJSON, dashDictMD5, monSvctype,
-		)
+		_, err = oDb.upsertAlerts(ctx, alertsUpsert{
+			source: `SELECT
+				"package differences in cluster" AS dash_type,
+				? AS svc_id,
+				"" AS node_id,
+				? AS dash_severity,
+				"%(n)s package differences in cluster %(nodes)s" AS dash_fmt,
+				? AS dash_dict,
+				? AS dash_dict_md5,
+				? AS dash_created,
+				? AS dash_updated,
+				? AS dash_env`,
+			args:    []any{svcID, sev, dashDictJSON, dashDictMD5, now, now, monSvctype},
+			columns: []string{"dash_type", "svc_id", "node_id", "dash_severity", "dash_fmt", "dash_dict", "dash_dict_md5", "dash_created", "dash_updated", "dash_env"},
+			update: []string{"dash_severity = s.dash_severity", "dash_fmt = s.dash_fmt", "dash_dict = s.dash_dict",
+				"dash_dict_md5 = s.dash_dict_md5", "dash_updated = s.dash_updated", "dash_env = s.dash_env"},
+		})
 		if err != nil {
 			return fmt.Errorf("failed to insert/update dashboard: %v", err)
 		}
@@ -1306,10 +1286,10 @@ func (oDb *DB) DashboardUpdatePkgDiffForNode(ctx context.Context, nodeID string)
 			DELETE FROM dashboard
 			WHERE svc_id IN (%s)
 			AND dash_type = "package differences in cluster"
-			AND dash_updated < @now
+			AND dash_updated < ?
 		`, Placeholders(len(svcIDs)))
 
-		_, err := oDb.ExecContext(ctx, query, svcIDs...)
+		_, err := oDb.ExecContext(ctx, query, append(svcIDs, now)...)
 		if err != nil {
 			return fmt.Errorf("failed to delete old dashboard entries: %v", err)
 		}
@@ -1332,9 +1312,11 @@ func (oDb *DB) DashboardUpdateCompModDiff(ctx context.Context) error {
 }
 
 func (oDb *DB) DashboardUpdateCompModDiffForSvc(ctx context.Context, svcID string) error {
-	_, err := oDb.ExecContext(ctx, "SET @now = NOW()")
+	// One instant for the alert written and the purge of the others: an
+	// alert written in this run is not purged.
+	now, err := oDb.databaseNow(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to set @now: %v", err)
+		return err
 	}
 
 	defer func() {
@@ -1343,8 +1325,8 @@ func (oDb *DB) DashboardUpdateCompModDiffForSvc(ctx context.Context, svcID strin
 			WHERE
 				dash_type = "compliance moduleset attachment differences in cluster" AND
 				svc_id = ? AND
-				dash_updated < @now
-		`, svcID)
+				dash_updated < ?
+		`, svcID, now)
 		if err != nil {
 			slog.Warn(fmt.Sprintf("failed to clean up old dashboard entries: %v", err))
 		}
@@ -1440,23 +1422,22 @@ func (oDb *DB) DashboardUpdateCompModDiffForSvc(ctx context.Context, svcID strin
 	dashDictMD5 := fmt.Sprintf("%x", md5.Sum(dashDictJSON))
 
 	// Insérer ou mettre à jour l'alerte
-	query := `
-		INSERT INTO dashboard
-		SET
-			dash_type = "compliance moduleset attachment differences in cluster",
-			svc_id = ?,
-			node_id = "",
-			dash_severity = ?,
-			dash_fmt = '%(n)d differences in cluster %(nodes)s',
-			dash_dict = ?,
-			dash_dict_md5 = ?,
-			dash_created = @now,
-			dash_updated = @now,
-			dash_env = ?
-		ON DUPLICATE KEY UPDATE
-			dash_updated = @now
-	`
-	_, err = oDb.ExecContext(ctx, query, svcID, sev, dashDictJSON, dashDictMD5, monSvctype.String)
+	_, err = oDb.upsertAlerts(ctx, alertsUpsert{
+		source: `SELECT
+			"compliance moduleset attachment differences in cluster" AS dash_type,
+			? AS svc_id,
+			"" AS node_id,
+			? AS dash_severity,
+			'%(n)d differences in cluster %(nodes)s' AS dash_fmt,
+			? AS dash_dict,
+			? AS dash_dict_md5,
+			? AS dash_created,
+			? AS dash_updated,
+			? AS dash_env`,
+		args:    []any{svcID, sev, dashDictJSON, dashDictMD5, now, now, monSvctype.String},
+		columns: []string{"dash_type", "svc_id", "node_id", "dash_severity", "dash_fmt", "dash_dict", "dash_dict_md5", "dash_created", "dash_updated", "dash_env"},
+		update:  []string{"dash_updated = s.dash_updated"},
+	})
 	if err != nil {
 		return fmt.Errorf("failed to insert/update dashboard: %v", err)
 	}
@@ -1500,9 +1481,11 @@ func (oDb *DB) DashboardUpdateCompRsetDiff(ctx context.Context) error {
 }
 
 func (oDb *DB) DashboardUpdateCompRsetDiffForSvc(ctx context.Context, svcID string) error {
-	_, err := oDb.ExecContext(ctx, "SET @now = NOW()")
+	// One instant for the alert written and the purge of the others: an
+	// alert written in this run is not purged.
+	now, err := oDb.databaseNow(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to set @now: %v", err)
+		return err
 	}
 
 	defer func() {
@@ -1511,8 +1494,8 @@ func (oDb *DB) DashboardUpdateCompRsetDiffForSvc(ctx context.Context, svcID stri
 			WHERE
 				dash_type = "compliance ruleset attachment differences in cluster" AND
 				svc_id = ? AND
-				dash_updated < @now
-		`, svcID)
+				dash_updated < ?
+		`, svcID, now)
 		if err != nil {
 			slog.Warn(fmt.Sprintf("failed to clean up old dashboard entries: %v", err))
 		}
@@ -1610,23 +1593,22 @@ func (oDb *DB) DashboardUpdateCompRsetDiffForSvc(ctx context.Context, svcID stri
 	dashDictMD5 := fmt.Sprintf("%x", md5.Sum(dashDictJSON))
 
 	// Insérer ou mettre à jour l'alerte
-	query := `
-		INSERT INTO dashboard
-		SET
-			dash_type = "compliance ruleset attachment differences in cluster",
-			svc_id = ?,
-			node_id = "",
-			dash_severity = ?,
-			dash_fmt = '%(n)d differences in cluster %(nodes)s',
-			dash_dict = ?,
-			dash_dict_md5 = ?,
-			dash_created = @now,
-			dash_updated = @now,
-			dash_env = ?
-		ON DUPLICATE KEY UPDATE
-			dash_updated = @now
-	`
-	_, err = oDb.ExecContext(ctx, query, svcID, sev, dashDictJSON, dashDictMD5, monSvctype.String)
+	_, err = oDb.upsertAlerts(ctx, alertsUpsert{
+		source: `SELECT
+			"compliance ruleset attachment differences in cluster" AS dash_type,
+			? AS svc_id,
+			"" AS node_id,
+			? AS dash_severity,
+			'%(n)d differences in cluster %(nodes)s' AS dash_fmt,
+			? AS dash_dict,
+			? AS dash_dict_md5,
+			? AS dash_created,
+			? AS dash_updated,
+			? AS dash_env`,
+		args:    []any{svcID, sev, dashDictJSON, dashDictMD5, now, now, monSvctype.String},
+		columns: []string{"dash_type", "svc_id", "node_id", "dash_severity", "dash_fmt", "dash_dict", "dash_dict_md5", "dash_created", "dash_updated", "dash_env"},
+		update:  []string{"dash_updated = s.dash_updated"},
+	})
 	if err != nil {
 		return fmt.Errorf("failed to insert/update dashboard: %v", err)
 	}
@@ -1695,4 +1677,93 @@ func (oDb *DB) GetAlertEventsOf(ctx context.Context, id string, groups []string,
 		events[i], events[j] = events[j], events[i]
 	}
 	return events, true, truncated, nil
+}
+
+// DashboardUpdateServicesBelowSLA raises the "service availability below SLA"
+// alert of each service whose availability rate of the last 30 days is under
+// its target, critical in production, a warning elsewhere, its message naming
+// both, and clears it once the rate is back over the target, or the target or
+// the rate gone. The rate is that the task services_availability stores.
+func (oDb *DB) DashboardUpdateServicesBelowSLA(ctx context.Context) error {
+	const below = "svc_sla IS NOT NULL AND svc_availability IS NOT NULL AND svc_availability < svc_sla"
+	// "99.500" reads "99.5", "97.210000" "97.21": the percents as written.
+	const percent = "CONCAT(TRIM(TRAILING '.' FROM TRIM(TRAILING '0' FROM CAST(%s AS CHAR))), '%%')"
+	availability := fmt.Sprintf(percent, "ROUND(svc_availability, 2)")
+	sla := fmt.Sprintf(percent, "svc_sla")
+	u := alertsUpsert{
+		source: `SELECT
+		  svc_id, '' AS node_id, 'service availability below SLA' AS dash_type, IF(svc_env = 'PRD', 3, 2) AS dash_severity,
+		  'availability %(availability)s below the SLA of %(sla)s' AS dash_fmt,
+		  JSON_OBJECT('availability', ` + availability + `, 'sla', ` + sla + `) AS dash_dict,
+		  NOW() AS dash_created, NOW() AS dash_updated, svc_env AS dash_env, '' AS dash_instance
+		FROM services
+		WHERE ` + below,
+		columns: []string{"svc_id", "node_id", "dash_type", "dash_severity", "dash_fmt", "dash_dict", "dash_created", "dash_updated", "dash_env", "dash_instance"},
+		update:  []string{"dash_severity = s.dash_severity", "dash_fmt = s.dash_fmt", "dash_dict = s.dash_dict", "dash_env = s.dash_env", "dash_updated = s.dash_updated"},
+	}
+	if count, err := oDb.upsertAlerts(ctx, u); err != nil {
+		return err
+	} else if count > 0 {
+		oDb.SetChange("dashboard")
+	}
+	request := `
+		DELETE FROM dashboard
+		WHERE dash_type = 'service availability below SLA'
+		  AND svc_id NOT IN (SELECT svc_id FROM services WHERE ` + below + `)`
+	if count, err := oDb.execCountContext(ctx, request); err != nil {
+		return err
+	} else if count > 0 {
+		oDb.SetChange("dashboard")
+	}
+	return nil
+}
+
+// AlertTypesByIDs returns the type of each alert of ids that exists, by id.
+func (oDb *DB) AlertTypesByIDs(ctx context.Context, ids []int64) (map[int64]string, error) {
+	m := map[int64]string{}
+	if len(ids) == 0 {
+		return m, nil
+	}
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	query := "SELECT id, dash_type FROM dashboard WHERE id IN (" + strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",") + ")"
+	rows, err := oDb.DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("alertTypesByIDs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var (
+			id  int64
+			typ string
+		)
+		if err := rows.Scan(&id, &typ); err != nil {
+			return nil, fmt.Errorf("alertTypesByIDs: %w", err)
+		}
+		m[id] = typ
+	}
+	return m, rows.Err()
+}
+
+// DeleteAlertsByIDs deletes the alerts of ids in one statement, and returns how
+// many there were. Each one still closes its event (trigger dash_del_evt).
+func (oDb *DB) DeleteAlertsByIDs(ctx context.Context, ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	query := "DELETE FROM dashboard WHERE id IN (" + strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",") + ")"
+	n, err := oDb.execCountContext(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("deleteAlertsByIDs: %w", err)
+	}
+	if n > 0 {
+		oDb.SetChange("dashboard")
+	}
+	return n, nil
 }

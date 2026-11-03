@@ -105,7 +105,8 @@ paths:
         switch, abort, clear, freeze and thaw on a service; the same, and restart,
         takeover, syncall, syncnodes, syncdrp, enable, disable, compliance_check
         and compliance_fix (CompExec privilege, on every module attached to the
-        service) on an instance or on its resources; pushasset, pushdisks, pushpkg, pushpatch, pushstats,
+        service) on an instance or on its resources, and "freeze --slaves" and
+        "thaw --slaves" on the encapsulated slaves of an instance; pushasset, pushdisks, pushpkg, pushpatch, pushstats,
         checks, sysreport, updatecomp, updatepkg, scanscsi,
         reboot, schedule_reboot, unschedule_reboot, shutdown, drain,
         compliance_check, compliance_fix (on every module attached to the node),
@@ -116,8 +117,10 @@ paths:
 
         One entry answers with the queued action, as GET /actions/{id} does, or
         with a problem. A list always answers 200, with the queued actions in
-        data and one message per refused entry in error; entries differing only
-        by rid are merged into one action on those resources.
+        data and one message per refused entry in error, and in refusals the
+        index of each refused entry in the list with its reason; entries
+        differing only by rid are merged into one action on those resources, a
+        refusal then naming each of them.
       requestBody:
         required: true
         content:
@@ -134,11 +137,13 @@ paths:
         200:
           description: |
             The queued action for one entry; for a list, an object with the
-            queued actions in data and the refusals in error.
+            queued actions in data and the refusals in error and refusals.
           content:
             application/json:
               schema:
-                type: object
+                oneOf:
+                  - $ref: '#/components/schemas/ListResponse'
+                  - $ref: '#/components/schemas/ActionEnqueueListResult'
         400:
           $ref: '#/components/responses/400'
         401:
@@ -343,6 +348,43 @@ paths:
             application/json:
               schema:
                 type: object
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /alerts/delete:
+    post:
+      operationId: PostAlertsDelete
+      description: |
+        Delete alerts by id, up to 10000 at once, as DELETE /alerts/{id} does
+        one by one: in one transaction, a single entry in the audit log naming
+        their count and types, and a single change event. The ids not found, deleted
+        already say, are told in not_found and do not stop the others. Requires
+        the AlertsManager privilege. The checks that raised an alert raise it again
+        at their next run if the cause remains.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertsDeleteInput'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertsDeleteResult'
         400:
           $ref: '#/components/responses/400'
         401:
@@ -1089,7 +1131,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListResponse'
+                $ref: '#/components/schemas/QuotaListResponse'
         404:
           $ref: '#/components/responses/404'
         500:
@@ -1396,7 +1438,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListResponse'
+                $ref: '#/components/schemas/ArrayListResponse'
         500:
           $ref: '#/components/responses/500'
       security:
@@ -1453,6 +1495,355 @@ paths:
         - basicAuth: [ ]
         - bearerAuth: [ ]
 
+  /quotas:
+    get:
+      operationId: GetQuotas
+      description: |
+        List the quotas of the application codes in the disk groups of the
+        storage arrays, in MB, with the sizes of the disk groups and the space
+        each application uses there, from the v_disk_quota view.
+        A Manager or a StorageManager sees every quota, another user those of the
+        application codes one of their groups is responsible for.
+      parameters:
+        - $ref: '#/components/parameters/inQueryProps'
+        - $ref: '#/components/parameters/inQueryLimit'
+        - $ref: '#/components/parameters/inQueryOffset'
+        - $ref: '#/components/parameters/inQueryMeta'
+        - $ref: '#/components/parameters/inQueryStats'
+        - $ref: '#/components/parameters/inQueryOrderby'
+        - $ref: '#/components/parameters/inQueryGroupby'
+        - $ref: '#/components/parameters/inQueryFilter'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaListResponse'
+        401:
+          $ref: '#/components/responses/401'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /arrays/{array_id}/diskgroups/{dg_id}/quotas:
+    get:
+      operationId: GetArrayDiskgroupQuotas
+      description: |
+        List the quotas of a disk group of a storage array.
+        A Manager or a StorageManager sees every quota, another user those of the
+        application codes one of their groups is responsible for.
+      parameters:
+        - in: path
+          name: array_id
+          required: true
+          description: Storage array id or name
+          schema:
+            type: string
+        - in: path
+          name: dg_id
+          required: true
+          description: Disk group id
+          schema:
+            type: integer
+            format: int64
+        - $ref: '#/components/parameters/inQueryProps'
+        - $ref: '#/components/parameters/inQueryLimit'
+        - $ref: '#/components/parameters/inQueryOffset'
+        - $ref: '#/components/parameters/inQueryMeta'
+        - $ref: '#/components/parameters/inQueryStats'
+        - $ref: '#/components/parameters/inQueryOrderby'
+        - $ref: '#/components/parameters/inQueryGroupby'
+        - $ref: '#/components/parameters/inQueryFilter'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaListResponse'
+        401:
+          $ref: '#/components/responses/401'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+    post:
+      operationId: PostArrayDiskgroupQuotas
+      description: |
+        Give an application code, by app_id or app, a quota in a disk group, or
+        change the one it has. Requires the StorageManager privilege. Logged
+        (quota.add, quota.change); the space reserved in the disk group becomes
+        the sum of its quotas.
+      parameters:
+        - in: path
+          name: array_id
+          required: true
+          description: Storage array id or name
+          schema:
+            type: string
+        - in: path
+          name: dg_id
+          required: true
+          description: Disk group id
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuotaInput'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaChangeResponse'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /arrays/{array_id}/diskgroups/{dg_id}/quotas/{quota_id}:
+    post:
+      operationId: PostArrayDiskgroupQuota
+      description: |
+        Change a quota: its size, or the application code it is for. Requires
+        the StorageManager privilege. Logged (quota.change); the space reserved
+        in the disk group becomes the sum of its quotas.
+      parameters:
+        - in: path
+          name: array_id
+          required: true
+          description: Storage array id or name
+          schema:
+            type: string
+        - in: path
+          name: dg_id
+          required: true
+          description: Disk group id
+          schema:
+            type: integer
+            format: int64
+        - in: path
+          name: quota_id
+          required: true
+          description: Quota id
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuotaInput'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaChangeResponse'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+    delete:
+      operationId: DeleteArrayDiskgroupQuota
+      description: |
+        Delete a quota. Requires the StorageManager privilege. Logged
+        (quota.del); the space reserved in the disk group becomes the sum of its
+        quotas.
+      parameters:
+        - in: path
+          name: array_id
+          required: true
+          description: Storage array id or name
+          schema:
+            type: string
+        - in: path
+          name: dg_id
+          required: true
+          description: Disk group id
+          schema:
+            type: integer
+            format: int64
+        - in: path
+          name: quota_id
+          required: true
+          description: Quota id
+          schema:
+            type: integer
+            format: int64
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaChangeResponse'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /saves:
+    get:
+      operationId: GetSaves
+      description: |
+        List the backups the backup servers index, with the node and the service
+        each is of, the latest first, as the historical Saves view does.
+        save_size is in bytes.
+        A Manager sees every backup, another user those of the application
+        codes one of their groups is responsible for; the session filterset
+        applies.
+      parameters:
+        - $ref: '#/components/parameters/inQueryProps'
+        - $ref: '#/components/parameters/inQueryLimit'
+        - $ref: '#/components/parameters/inQueryOffset'
+        - $ref: '#/components/parameters/inQueryMeta'
+        - $ref: '#/components/parameters/inQueryStats'
+        - $ref: '#/components/parameters/inQueryOrderby'
+        - $ref: '#/components/parameters/inQueryGroupby'
+        - $ref: '#/components/parameters/inQueryFilter'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaveListResponse'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /saves/summary:
+    get:
+      operationId: GetSavesSummary
+      description: |
+        The size of the backups and their number, summed by application code,
+        backup server, backup group, or object (the service of a backup, else
+        its node), the filters of the request applied: the charts of the
+        historical Saves view. The largest first.
+        A Manager sees every backup, another user those of the application
+        codes one of their groups is responsible for; the session filterset
+        applies.
+      parameters:
+        - in: query
+          name: by
+          required: true
+          description: |
+            What the backups are summed by: app, server, group or object. Not an
+            enum in this spec: its values would collide with those of
+            SanTopologyNode.kind in the generated Go constants.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/inQueryFilter'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavesSummaryResponse'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /saves/{save_id}:
+    get:
+      operationId: GetSave
+      description: |
+        Show a backup, an empty list when it does not exist or is out of reach.
+        A Manager sees every backup, another user those of the application
+        codes one of their groups is responsible for; the session filterset
+        applies.
+      parameters:
+        - in: path
+          name: save_id
+          required: true
+          description: Backup id
+          schema:
+            type: integer
+            format: int64
+        - $ref: '#/components/parameters/inQueryProps'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaveListResponse'
+        401:
+          $ref: '#/components/responses/401'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
   /arrays/{array_id}/diskgroups:
     get:
       operationId: GetArrayDiskgroups
@@ -1485,7 +1876,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListResponse'
+                $ref: '#/components/schemas/DiskGroupListResponse'
         400:
           $ref: '#/components/responses/400'
         401:
@@ -3213,6 +3604,275 @@ paths:
         - basicAuth: [ ]
         - bearerAuth: [ ]
 
+  /form_connectors:
+    get:
+      operationId: GetFormConnectors
+      description: |
+        The connectors of the forms: the external APIs their inputs and rest outputs
+        call through oc3. The secrets are never returned, only whether each one is
+        set. For the Managers and the FormsManagers.
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FormConnector'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+    post:
+      operationId: PostFormConnectors
+      description: |
+        Create a connector. Its secrets are sealed with the safe master key
+        (safe.keys_file): without one, a connector with secrets is refused. For the
+        Managers.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FormConnectorInput'
+      tags:
+        - collector
+      responses:
+        200:
+          description: The connector created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FormConnector'
+        400:
+          $ref: '#/components/responses/400'
+        409:
+          $ref: '#/components/responses/409'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+  /form_connectors/{connector_id}:
+    get:
+      operationId: GetFormConnector
+      parameters:
+        - in: path
+          name: connector_id
+          required: true
+          schema:
+            type: integer
+            format: int64
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FormConnector'
+        404:
+          $ref: '#/components/responses/404'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+    put:
+      operationId: PutFormConnector
+      description: |
+        Replace a connector. A secret given replaces the one set, null removes it,
+        absent keeps it. For the Managers.
+      parameters:
+        - in: path
+          name: connector_id
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FormConnectorInput'
+      tags:
+        - collector
+      responses:
+        200:
+          description: The connector replaced.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FormConnector'
+        400:
+          $ref: '#/components/responses/400'
+        404:
+          $ref: '#/components/responses/404'
+        409:
+          $ref: '#/components/responses/409'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+    delete:
+      operationId: DeleteFormConnector
+      description: Delete a connector. For the Managers.
+      parameters:
+        - in: path
+          name: connector_id
+          required: true
+          schema:
+            type: integer
+            format: int64
+      tags:
+        - collector
+      responses:
+        204:
+          description: Deleted.
+        404:
+          $ref: '#/components/responses/404'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+  /form_connectors/{connector_id}/test:
+    post:
+      operationId: PostFormConnectorTest
+      description: |
+        Call the connector once, as a form would, and tell how it answered: its
+        status, the time taken, the start of its answer. The method and the path
+        must be ones the connector allows. For the Managers.
+      parameters:
+        - in: path
+          name: connector_id
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FormConnectorTestInput'
+      tags:
+        - collector
+      responses:
+        200:
+          description: The outcome of the call, a refusal of the API included.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FormConnectorTestResult'
+        400:
+          $ref: '#/components/responses/400'
+        404:
+          $ref: '#/components/responses/404'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+  /forms/{form_id}/inputs/{input_id}/candidates:
+    post:
+      operationId: PostFormInputCandidates
+      description: |
+        The candidates of an input of a form calling a connector (its Connector
+        key), resolved by oc3 from the form as stored: the path is the input's
+        Function, relative to the connector's base url, its references replaced by
+        the values of data, each escaped as one path segment; the query, its Args.
+        The list is read from the answer at ResultPath ("items", "data.results"),
+        else the answer itself when a list, else its data. The form must be
+        published to the user, the connector to one of the groups responsible for
+        the form.
+      parameters:
+        - in: path
+          name: form_id
+          required: true
+          schema:
+            type: integer
+        - in: path
+          name: input_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FormCandidatesInput'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: array
+                    items: {}
+        400:
+          $ref: '#/components/responses/400'
+        404:
+          $ref: '#/components/responses/404'
+        502:
+          description: The external API failed, or its answer is unusable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
   /form_output_results/{results_id}:
     get:
       operationId: GetFormOutputResults
@@ -3604,6 +4264,10 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [data]
+                properties:
+                  data:
+                    type: boolean
         400:
           $ref: '#/components/responses/400'
         401:
@@ -3619,7 +4283,8 @@ paths:
       operationId: GetFormDiff
       description: |
         Show the change made by a revision, or the differences between cid and
-        other when set, as git prints them.
+        other when set, as git prints them: empty when the form is not published
+        to the caller.
       parameters:
         - in: path
           name: form_id
@@ -3647,7 +4312,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/FormDiffResponse'
         400:
           $ref: '#/components/responses/400'
         401:
@@ -3687,7 +4352,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListResponse'
+                $ref: '#/components/schemas/GroupListResponse'
         400:
           $ref: '#/components/responses/400'
         401:
@@ -3727,7 +4392,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/InfoResponse'
         400:
           $ref: '#/components/responses/400'
         401:
@@ -3767,7 +4432,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/InfoResponse'
         400:
           $ref: '#/components/responses/400'
         401:
@@ -3811,7 +4476,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListResponse'
+                $ref: '#/components/schemas/GroupListResponse'
         400:
           $ref: '#/components/responses/400'
         401:
@@ -3851,7 +4516,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/InfoResponse'
         400:
           $ref: '#/components/responses/400'
         401:
@@ -3891,7 +4556,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/InfoResponse'
         400:
           $ref: '#/components/responses/400'
         401:
@@ -3910,8 +4575,9 @@ paths:
     get:
       operationId: GetFormRevisions
       description: |
-        List the revisions of the form definition, from its git history: an empty
-        list when the form is not published to the caller.
+        List the revisions of the form definition, from its git history, the
+        newest first, 300 at most: an empty list when the form is not published
+        to the caller.
       parameters:
         - in: path
           name: form_id
@@ -3927,7 +4593,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/FormRevisionListResponse'
         400:
           $ref: '#/components/responses/400'
         401:
@@ -3942,7 +4608,8 @@ paths:
     get:
       operationId: GetFormRevision
       description: |
-        Show the form definition at a revision, as {"data": {"oid", "content"}}.
+        Show the form definition at a revision: empty when the revision holds
+        none, or when the form is not published to the caller.
       parameters:
         - in: path
           name: form_id
@@ -3964,7 +4631,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/FormRevisionResponse'
         400:
           $ref: '#/components/responses/400'
         401:
@@ -3979,8 +4646,9 @@ paths:
     post:
       operationId: PostFormRollback
       description: |
-        Restore the form definition of a revision, recorded as a new revision.
-        Requires the FormsManager privilege and responsibility for the form.
+        Restore the form definition of a revision, recorded as a new revision
+        and logged (form.rollback). Requires the FormsManager privilege and
+        responsibility for the form.
       parameters:
         - in: path
           name: form_id
@@ -4002,7 +4670,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/InfoResponse'
         400:
           $ref: '#/components/responses/400'
         401:
@@ -5472,17 +6140,25 @@ paths:
         - basicAuth: [ ]
         - bearerAuth: [ ]
 
-  /assistant/conversations/{conversation_id}/turns:
+  /assistant/conversations/{conversation_id}/runs:
     post:
-      operationId: PostAssistantTurn
+      operationId: PostAssistantRun
       description: |
-        Send a prompt and stream the turn of the agent; send the new prompt only, the agent keeps the history.
+        Run the agent on a conversation, in the AG-UI protocol
+        (https://docs.ag-ui.com): a new prompt, the last message, a message of
+        the user; or the decision on the action the conversation waits on,
+        `resume`. The agent keeps the history of the conversation and reads
+        none of the other messages but their ids, which tell it whether the
+        client holds its last stored message. The run is streamed as AG-UI
+        events, and ends with RUN_FINISHED, whose outcome is a success or an
+        interrupt for a confirmation, or RUN_ERROR.
 
         Relayed by oc3 to the AI agent, at the base_url and path of
         server.assistant, with the access token of the caller's single sign-on
         session, or the bearer token of the request; nothing else of the
         browser's request is forwarded. The agent's answers and error codes are
         returned as they are.
+        The body is relayed as it is, up to 4 MiB, the agent's own bound.
       tags:
         - assistant
       parameters:
@@ -5496,16 +6172,22 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AssistantTurnRequest'
+              $ref: '#/components/schemas/AssistantRunInput'
       responses:
         200:
-          description: The turn, streamed as server-sent events.
+          description: The run, streamed as server-sent events.
           content:
             text/event-stream:
               schema:
-                description: "The schema of each event of the stream, written as `event: <type>` then `data: <the event as JSON>` and an empty line; the stream ends after completed, confirmation_required or error."
+                description: "The schema of each event of the stream, written as `data: <the event as JSON>` and an empty line, without an event name; `: keepalive` comments come while nothing else is written."
                 allOf:
-                  - $ref: '#/components/schemas/AssistantStreamEvent'
+                  - $ref: '#/components/schemas/AssistantRunEvent'
+        400:
+          description: "Invalid input: not a RunAgentInput, another thread, an invalid run id, prompt, decision or protocol version (invalid_request, thread_mismatch, invalid_run_id, invalid_prompt, invalid_decision, invalid_protocol_version, unsupported_protocol_version, invalid_tools, invalid_tool_results)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantError'
         401:
           description: No access token for the caller - a password sign-in, or a single sign-on session to open again (assistant_token_unavailable) - or the agent refused it.
           content:
@@ -5519,7 +6201,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/AssistantError'
         404:
-          description: The assistant is not configured (assistant_disabled), or the conversation does not exist.
+          description: The assistant is not configured (assistant_disabled), or the conversation does not exist (conversation_not_found).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantError'
+        409:
+          description: A turn is running or an action waits a decision (conversation_busy), or the conversation waits on no such confirmation (confirmation_not_pending).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantError'
+        410:
+          description: The conversation, or its confirmation, has expired (conversation_expired, confirmation_expired).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantError'
+        413:
+          description: The body exceeds 4 MiB, or the prompt 32 KiB (request_too_large, prompt_too_large).
           content:
             application/json:
               schema:
@@ -5532,30 +6232,6 @@ paths:
                 $ref: '#/components/schemas/AssistantError'
         503:
           description: The agent is unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AssistantError'
-        400:
-          description: Invalid request.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AssistantError'
-        409:
-          description: A turn is running, an action waits a decision, or a limit is reached.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AssistantError'
-        410:
-          description: The conversation has expired.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AssistantError'
-        413:
-          description: The prompt is too large.
           content:
             application/json:
               schema:
@@ -5564,11 +6240,12 @@ paths:
         - basicAuth: [ ]
         - bearerAuth: [ ]
 
-  /assistant/conversations/{conversation_id}/turns/{turn_id}/confirmation:
-    post:
-      operationId: PostAssistantConfirmation
+  /assistant/capabilities:
+    get:
+      operationId: GetAssistantCapabilities
       description: |
-        Approve or reject the action a turn waits on, and stream the rest of the turn.
+        What the runs can do, as an AG-UI AgentCapabilities: streaming, the tools
+        of the client, the interrupts without edits.
 
         Relayed by oc3 to the AI agent, at the base_url and path of
         server.assistant, with the access token of the caller's single sign-on
@@ -5577,34 +6254,15 @@ paths:
         returned as they are.
       tags:
         - assistant
-      parameters:
-        - in: path
-          name: conversation_id
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: turn_id
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AssistantConfirmationRequest'
       responses:
         200:
-          description: The turn, streamed as server-sent events.
+          description: The capabilities.
           content:
-            text/event-stream:
+            application/json:
               schema:
-                description: "The schema of each event of the stream, written as `event: <type>` then `data: <the event as JSON>` and an empty line; the stream ends after completed, confirmation_required or error."
-                allOf:
-                  - $ref: '#/components/schemas/AssistantStreamEvent'
+                $ref: '#/components/schemas/AssistantCapabilities'
         401:
-          description: No access token for the caller - a password sign-in, or a single sign-on session to open again (assistant_token_unavailable) - or the agent refused it.
+          description: No access token for the caller (assistant_token_unavailable), or the agent refused it.
           content:
             application/json:
               schema:
@@ -5616,7 +6274,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/AssistantError'
         404:
-          description: The assistant is not configured (assistant_disabled), or the conversation does not exist.
+          description: The assistant is not configured (assistant_disabled).
           content:
             application/json:
               schema:
@@ -5629,30 +6287,6 @@ paths:
                 $ref: '#/components/schemas/AssistantError'
         503:
           description: The agent is unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AssistantError'
-        400:
-          description: Invalid request.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AssistantError'
-        409:
-          description: A turn is running, an action waits a decision, or a limit is reached.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AssistantError'
-        410:
-          description: The conversation has expired.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AssistantError'
-        413:
-          description: The prompt is too large.
           content:
             application/json:
               schema:
@@ -6618,7 +7252,10 @@ paths:
       operationId: PostLogs
       description: |
         Create a log event. The entry type is forced to 'message', the default
-        level is 'info', and empty log events are discarded.
+        level is 'info', and empty log events are discarded. A user writes it in
+        their name, the user who really signed in kept when impersonating; a node
+        as "agent". A format over 200 characters, an unknown level or a log_dict
+        over 64 KiB is refused with 400.
       requestBody:
         required: true
         content:
@@ -6630,8 +7267,11 @@ paths:
               properties:
                 log_fmt:
                   type: string
+                  maxLength: 200
+                  description: The message, its %(key)s placeholders taking the values of log_dict.
                 log_level:
                   type: string
+                  enum: [debug, info, warning, error, critical]
                 log_dict:
                   type: object
                 node_id:
@@ -7363,6 +8003,39 @@ paths:
           $ref: '#/components/responses/400'
         401:
           $ref: '#/components/responses/401'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /sysreport/purges/{purge_id}:
+    get:
+      operationId: GetSysreportPurge
+      description: |
+        The progress of a sysreport purge: queued, running, done or failed, with
+        what it removed on each node holding the files. Kept 7 days. Manager only.
+      parameters:
+        - in: path
+          name: purge_id
+          required: true
+          schema:
+            type: string
+      tags:
+        - nodes
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysreportPurgeResponse'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
         404:
           $ref: '#/components/responses/404'
         500:
@@ -9143,6 +9816,55 @@ paths:
         - basicAuth: [ ]
         - bearerAuth: [ ]
 
+  /nodes/{node_id}/sysreport/purge:
+    post:
+      operationId: PostNodeSysreportPurge
+      description: |
+        Remove files from the sysreport history for good, of this node or, with
+        all_nodes, of every node having a sysreport: each revision is recreated
+        without them, its date and author kept, a revision that held nothing else
+        is dropped, then the former revisions and the contents they alone held are
+        destroyed. The ids of the revisions change from the first one that held a
+        file. A file is named as the sysreport routes show it, by kind and path or
+        command line. The purge is queued for the scheduler: the response gives
+        its id, GET /sysreport/purges/{purge_id} its progress. It does not stop a
+        node from reporting the files again. Manager only; logged.
+      parameters:
+        - in: path
+          name: node_id
+          required: true
+          description: Node identifier (node_id UUID)
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SysreportPurgeInput'
+      tags:
+        - nodes
+      responses:
+        202:
+          description: Queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysreportPurgeResponse'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
   /nodes/{node_id}/sysreport/timediff:
     get:
       operationId: GetNodeSysreportTimediff
@@ -9711,6 +10433,127 @@ paths:
         - bearerAuth: [ ]
       tags:
         - collector
+
+  /nodes/{node_id}/wiki:
+    parameters:
+      - in: path
+        name: node_id
+        required: true
+        description: Node identifier (node_id UUID or nodename)
+        schema:
+          type: string
+    get:
+      operationId: GetNodeWiki
+      description: |
+        The notes of the node, a wiki page in Markdown: its latest revision
+        with its body, null when none was saved, and the list of its
+        revisions, the latest first, without their body. writable tells
+        whether the caller may save a revision: a Manager, or a user
+        responsible for the node.
+      parameters:
+        - in: query
+          name: limit
+          description: At most this many revisions in the list (default 20, at most 200)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiPage'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+    post:
+      operationId: PostNodeWiki
+      description: |
+        Save a revision of the notes of the node, over the revision base_id,
+        0 when the page has none yet. 409 when base_id is not the latest
+        revision any more: someone saved meanwhile, and nothing is saved.
+        400 when the body is larger than 60000 bytes. A Manager, or a user
+        responsible for the node.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WikiRevisionInput'
+      tags:
+        - collector
+      responses:
+        201:
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiRevision'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        409:
+          $ref: '#/components/responses/409'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /nodes/{node_id}/wiki/{revision_id}:
+    parameters:
+      - in: path
+        name: node_id
+        required: true
+        description: Node identifier (node_id UUID or nodename)
+        schema:
+          type: string
+      - in: path
+        name: revision_id
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: GetNodeWikiRevision
+      description: A revision of the notes of the node, with its body.
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiRevision'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
 
   /nodes/{node_id}/am_i_responsible:
     get:
@@ -10531,6 +11374,10 @@ paths:
         nodes of those services (the nodes named after their instances'
         `mon_vmname`). Only the nodes and services of the apps the user's groups
         are responsible for are compared, unless the user is a manager.
+        A diff is cached until the packages of one of its nodes change, and at most
+        server.packages_diff.concurrency of them are computed at once, each given
+        server.packages_diff.timeout: 503 when the request waited longer, the
+        computation going on for the next request.
         Fewer than two nodes is a 400, except with `encap`, which then returns an
         empty list.
       parameters:
@@ -10564,6 +11411,8 @@ paths:
           $ref: '#/components/responses/401'
         500:
           $ref: '#/components/responses/500'
+        503:
+          $ref: '#/components/responses/503'
       security:
         - basicAuth: [ ]
         - bearerAuth: [ ]
@@ -10598,7 +11447,13 @@ paths:
 
     post:
       operationId: PostServices
-      description: Create or update a service (by svcname or svc_id)
+      description: |
+        Create or update a service. The service is the one of svc_id when given;
+        else the one of svcname in cluster_id when given; else the one service
+        named svcname the caller may see (409 when several are, in different
+        clusters). Updating a service requires being responsible for it;
+        creating one requires the Manager privilege (403 otherwise), as creating
+        a node does, and a cluster_id the collector knows (400 otherwise).
       requestBody:
         required: true
         content:
@@ -10868,6 +11723,127 @@ paths:
             application/json:
               schema:
                 type: object
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /services/{svc_id}/wiki:
+    parameters:
+      - in: path
+        name: svc_id
+        required: true
+        description: Service identifier (svc_id UUID or svcname)
+        schema:
+          type: string
+    get:
+      operationId: GetServiceWiki
+      description: |
+        The notes of the service, a wiki page in Markdown: its latest revision
+        with its body, null when none was saved, and the list of its
+        revisions, the latest first, without their body. writable tells
+        whether the caller may save a revision: a Manager, or a user
+        responsible for the service.
+      parameters:
+        - in: query
+          name: limit
+          description: At most this many revisions in the list (default 20, at most 200)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiPage'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+    post:
+      operationId: PostServiceWiki
+      description: |
+        Save a revision of the notes of the service, over the revision base_id,
+        0 when the page has none yet. 409 when base_id is not the latest
+        revision any more: someone saved meanwhile, and nothing is saved.
+        400 when the body is larger than 60000 bytes. A Manager, or a user
+        responsible for the service.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WikiRevisionInput'
+      tags:
+        - collector
+      responses:
+        201:
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiRevision'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        409:
+          $ref: '#/components/responses/409'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /services/{svc_id}/wiki/{revision_id}:
+    parameters:
+      - in: path
+        name: svc_id
+        required: true
+        description: Service identifier (svc_id UUID or svcname)
+        schema:
+          type: string
+      - in: path
+        name: revision_id
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: GetServiceWikiRevision
+      description: A revision of the notes of the service, with its body.
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiRevision'
         401:
           $ref: '#/components/responses/401'
         403:
@@ -12162,7 +13138,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListResponse'
+                $ref: '#/components/schemas/ResinfoListResponse'
         404:
           $ref: '#/components/responses/404'
         500:
@@ -13569,6 +14545,135 @@ paths:
         - basicAuth: [ ]
         - bearerAuth: [ ]
 
+  /users/{user_id}/nodes:
+    get:
+      operationId: GetUserNodes
+      description: |
+        List the nodes the user is responsible for: those whose team_responsible
+        is one of the user's groups. The node selector of the forms
+        (__node_selector__) lists /users/self/nodes.
+        Managers and UserManager see every user's; other users only those of
+        the users sharing one of their organisational groups, and their own.
+      parameters:
+        - in: path
+          name: user_id
+          required: true
+          description: |
+            User identifier: auth_user.id, the user email when it contains an
+            "@", or "self" for the authenticated user.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/inQueryProps'
+        - $ref: '#/components/parameters/inQueryLimit'
+        - $ref: '#/components/parameters/inQueryOffset'
+        - $ref: '#/components/parameters/inQueryMeta'
+        - $ref: '#/components/parameters/inQueryStats'
+        - $ref: '#/components/parameters/inQueryOrderby'
+        - $ref: '#/components/parameters/inQueryFilter'
+        - $ref: '#/components/parameters/inQueryGroupby'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListResponse'
+        401:
+          $ref: '#/components/responses/401'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /users/{user_id}/services:
+    get:
+      operationId: GetUserServices
+      description: |
+        List the services the user is responsible for: those of the applications
+        one of the user's groups is responsible for, each once. The service
+        selector of the forms (__service_selector__) lists /users/self/services.
+        Managers and UserManager see every user's; other users only those of
+        the users sharing one of their organisational groups, and their own.
+      parameters:
+        - in: path
+          name: user_id
+          required: true
+          description: |
+            User identifier: auth_user.id, the user email when it contains an
+            "@", or "self" for the authenticated user.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/inQueryProps'
+        - $ref: '#/components/parameters/inQueryLimit'
+        - $ref: '#/components/parameters/inQueryOffset'
+        - $ref: '#/components/parameters/inQueryMeta'
+        - $ref: '#/components/parameters/inQueryStats'
+        - $ref: '#/components/parameters/inQueryOrderby'
+        - $ref: '#/components/parameters/inQueryFilter'
+        - $ref: '#/components/parameters/inQueryGroupby'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListResponse'
+        401:
+          $ref: '#/components/responses/401'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /users/{user_id}/primary_group:
+    get:
+      operationId: GetUserPrimaryGroup
+      description: |
+        List the primary group of the user, none or one, as a list of groups.
+        The __user_primary_group__ default of the forms reads the role of
+        /users/self/primary_group.
+        Managers and UserManager see every user's; other users only those of
+        the users sharing one of their organisational groups, and their own.
+      parameters:
+        - in: path
+          name: user_id
+          required: true
+          description: |
+            User identifier: auth_user.id, the user email when it contains an
+            "@", or "self" for the authenticated user.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/inQueryProps'
+        - $ref: '#/components/parameters/inQueryLimit'
+        - $ref: '#/components/parameters/inQueryOffset'
+        - $ref: '#/components/parameters/inQueryMeta'
+        - $ref: '#/components/parameters/inQueryStats'
+        - $ref: '#/components/parameters/inQueryOrderby'
+        - $ref: '#/components/parameters/inQueryFilter'
+        - $ref: '#/components/parameters/inQueryGroupby'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupListResponse'
+        401:
+          $ref: '#/components/responses/401'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
   /users/{user_id}/groups/{group_id}:
     post:
       operationId: PostUserGroup
@@ -13882,6 +14987,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkflowListResponse'
+        401:
+          $ref: '#/components/responses/401'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /compliance/attachments:
+    post:
+      operationId: PostComplianceAttachments
+      description: |
+        Attach or detach modulesets and rulesets on nodes and services in bulk.
+        Each pair goes through the checks of its single route (POST and DELETE
+        /nodes/{node_id}/compliance/modulesets/{mset_id}, and the like for the
+        rulesets and the services): the caller's responsibility for the node or
+        the service, the moduleset or ruleset, whether it is attached already or
+        still, and, to attach, whether it may be attached there. A pair refused
+        does not stop the others: the response gives the outcome of each, in the
+        order of the request, with the status and the message its single route
+        answers with. At most 1000 pairs.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComplianceAttachmentsInput'
+      tags:
+        - collector
+      responses:
+        200:
+          description: The outcome of each pair
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceAttachmentsResponse'
+        400:
+          $ref: '#/components/responses/400'
         401:
           $ref: '#/components/responses/401'
         500:
@@ -15683,6 +16826,42 @@ paths:
         - bearerAuth: [ ]
 
   /compliance/rulesets_nodes:
+    get:
+      operationId: GetComplianceRulesetsNodes
+      description: |
+        List the nodes the caller may see with the rulesets attached to them: one row per node
+        and ruleset, and one with no ruleset for a node that has none, as the
+        historical collector's "node rulesets" table (comp_rulesets_nodes). The props are those of the nodes
+        list, plus the id and the name of the ruleset;
+        filter on its name with "empty" to find the nodes without any. The
+        session filterset applies.
+      parameters:
+        - $ref: '#/components/parameters/inQueryProps'
+        - $ref: '#/components/parameters/inQueryLimit'
+        - $ref: '#/components/parameters/inQueryOffset'
+        - $ref: '#/components/parameters/inQueryMeta'
+        - $ref: '#/components/parameters/inQueryStats'
+        - $ref: '#/components/parameters/inQueryOrderby'
+        - $ref: '#/components/parameters/inQueryFilter'
+        - $ref: '#/components/parameters/inQueryGroupby'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompNodeRulesetListResponse'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
     post:
       operationId: PostComplianceRulesetsNodes
       description: |
@@ -15773,6 +16952,42 @@ paths:
         - bearerAuth: [ ]
 
   /compliance/rulesets_services:
+    get:
+      operationId: GetComplianceRulesetsServices
+      description: |
+        List the services the caller may see with the rulesets attached to them or to their encapsulated part (slave): one row per service
+        and ruleset, and one with no ruleset for a service that has none, as the
+        historical collector's "service rulesets" table (comp_rulesets_services). The props are those of the services
+        list, plus the id and the name of the ruleset, and slave;
+        filter on its name with "empty" to find the services without any. The
+        session filterset applies.
+      parameters:
+        - $ref: '#/components/parameters/inQueryProps'
+        - $ref: '#/components/parameters/inQueryLimit'
+        - $ref: '#/components/parameters/inQueryOffset'
+        - $ref: '#/components/parameters/inQueryMeta'
+        - $ref: '#/components/parameters/inQueryStats'
+        - $ref: '#/components/parameters/inQueryOrderby'
+        - $ref: '#/components/parameters/inQueryFilter'
+        - $ref: '#/components/parameters/inQueryGroupby'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompServiceRulesetListResponse'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
     post:
       operationId: PostComplianceRulesetsServices
       description: |
@@ -15866,6 +17081,944 @@ paths:
         - basicAuth: [ ]
         - bearerAuth: [ ]
 
+  /compliance/modules:
+    get:
+      operationId: GetComplianceModules
+      description: |
+        List the compliance modules of the repository oc3 keeps them in, by order
+        then name: the entries of the compliance directory of the agents named
+        S<order>-<name>, an executable script or a directory holding main or
+        scripts/main. Each with the last commit that changed it.
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceModuleList'
+        401:
+          $ref: '#/components/responses/401'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+    post:
+      operationId: PostComplianceModules
+      description: |
+        Create a compliance module, S<order>-<name>, in a commit authored by the user:
+        a script (kind script, the default), one executable file starting with #!; or
+        a directory (kind directory) holding files, one of them its entry, main or
+        scripts/main, executable. The name starts with a letter, followed by letters,
+        digits and _.+- (64 at most); the order is 0 to 99999. A file holds 1 MiB at
+        most, a directory 500 files and 10 MiB. A module of that name, whatever its
+        order, is a 409, as is a change of the repository made meanwhile. Requires
+        the CompManager privilege. Logged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComplianceModuleCreate'
+      tags:
+        - collector
+      responses:
+        201:
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceModuleDetail'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        409:
+          $ref: '#/components/responses/409'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+  /compliance/modules_import:
+    post:
+      operationId: PostComplianceModulesImport
+      description: |
+        Create a directory module from an archive, a .tar.gz or a .zip, holding its
+        files; an archive holding one directory at its root is read from inside it.
+        Only regular files are taken: a link, a device or a path out of the module
+        is refused. The rules of a directory module apply. Requires the CompManager
+        privilege. Logged.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [name, order, archive]
+              properties:
+                name:
+                  type: string
+                order:
+                  type: integer
+                message:
+                  type: string
+                archive:
+                  type: string
+                  format: binary
+      tags:
+        - collector
+      responses:
+        201:
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceModuleDetail'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        409:
+          $ref: '#/components/responses/409'
+        413:
+          description: The archive is larger than 20 MiB.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+  /compliance/modules/{name}:
+    get:
+      operationId: GetComplianceModule
+      description: |
+        Display a compliance module: its files, its last 100 commits, and the
+        modulesets naming it.
+      parameters:
+        - in: path
+          name: name
+          required: true
+          description: The name of the module, without its order
+          schema:
+            type: string
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceModuleDetail'
+        401:
+          $ref: '#/components/responses/401'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+  /compliance/modules/{name}/file:
+    get:
+      operationId: GetComplianceModuleFile
+      description: |
+        Return the content of a file of a compliance module, the first 1 MiB of it.
+      parameters:
+        - in: path
+          name: name
+          required: true
+          description: The name of the module, without its order
+          schema:
+            type: string
+        - in: query
+          name: path
+          required: false
+          description: The path of the file in the module, as the module lists it; empty for a script module
+          schema:
+            type: string
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceModuleFileContent'
+        401:
+          $ref: '#/components/responses/401'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+    put:
+      operationId: PutComplianceModuleFile
+      description: |
+        Create or replace a file of a module, in a commit authored by the user: the
+        script of a script module (path empty, kept executable), or a file of a
+        directory module. base is the revision the change was made from, the last
+        commit of the module as read: the module changed since is a 412. Requires the
+        CompManager privilege. Logged.
+      parameters:
+        - in: path
+          name: name
+          required: true
+          description: The name of the module, without its order
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComplianceModuleFileWrite'
+      tags:
+        - collector
+      responses:
+        200:
+          description: The module as changed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceModuleDetail'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        409:
+          $ref: '#/components/responses/409'
+        412:
+          description: The module changed since the revision given, base.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+    delete:
+      operationId: DeleteComplianceModuleFile
+      description: |
+        Remove a file of a directory module, in a commit authored by the user; its
+        entry cannot go. base is the revision the change was made from. Requires the
+        CompManager privilege. Logged.
+      parameters:
+        - in: path
+          name: name
+          required: true
+          description: The name of the module, without its order
+          schema:
+            type: string
+        - in: query
+          name: path
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: base
+          required: true
+          description: The last commit of the module as read
+          schema:
+            type: string
+        - in: query
+          name: message
+          required: false
+          description: The message of the commit
+          schema:
+            type: string
+      tags:
+        - collector
+      responses:
+        200:
+          description: The module as changed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceModuleDetail'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        409:
+          $ref: '#/components/responses/409'
+        412:
+          description: The module changed since the revision given, base.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+  /compliance/modules/{name}/move:
+    post:
+      operationId: PostComplianceModuleMove
+      description: |
+        Rename a file of a directory module, in a commit authored by the user. base is
+        the revision the change was made from. Requires the CompManager privilege.
+        Logged.
+      parameters:
+        - in: path
+          name: name
+          required: true
+          description: The name of the module, without its order
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComplianceModuleFileMove'
+      tags:
+        - collector
+      responses:
+        200:
+          description: The module as changed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceModuleDetail'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        409:
+          $ref: '#/components/responses/409'
+        412:
+          description: The module changed since the revision given, base.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+  /compliance/modules/{name}/convert:
+    post:
+      operationId: PostComplianceModuleConvert
+      description: |
+        Turn a script module into a directory module whose entry, scripts/main, is the
+        script, in a commit authored by the user. base is the revision the change was
+        made from. Requires the CompManager privilege. Logged.
+      parameters:
+        - in: path
+          name: name
+          required: true
+          description: The name of the module, without its order
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComplianceModuleChange'
+      tags:
+        - collector
+      responses:
+        200:
+          description: The module as changed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceModuleDetail'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        409:
+          $ref: '#/components/responses/409'
+        412:
+          description: The module changed since the revision given, base.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+  /compliance/modules/{name}/restore:
+    post:
+      operationId: PostComplianceModuleRestore
+      description: |
+        Bring a module back to one of its versions, rev, a commit of its history: a
+        new commit authored by the user, from the revision base, the history keeping
+        every version. The rules of a module apply to the version restored. Requires
+        the CompManager privilege. Logged.
+      parameters:
+        - in: path
+          name: name
+          required: true
+          description: The name of the module, without its order
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComplianceModuleRestore'
+      tags:
+        - collector
+      responses:
+        200:
+          description: The module as changed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceModuleDetail'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        409:
+          $ref: '#/components/responses/409'
+        412:
+          description: The module changed since the revision given, base.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+  /compliance/modules/{name}/versions/{rev}/diff:
+    get:
+      operationId: GetComplianceModuleVersionDiff
+      description: |
+        What changed in a module since one of its versions, rev, a commit of its
+        history: file by file, from rev to the current version, each with its unified
+        diff (hunks only, 256 KiB at most).
+      parameters:
+        - in: path
+          name: name
+          required: true
+          description: The name of the module, without its order
+          schema:
+            type: string
+        - in: path
+          name: rev
+          required: true
+          description: A commit of the history of the module
+          schema:
+            type: string
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceModuleVersionDiff'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+  /compliance/modules/{name}/rename:
+    post:
+      operationId: PostComplianceModuleRename
+      description: |
+        Give a module another name or order, its entry becoming S<order>-<name>, in a
+        commit authored by the user, from the revision base. The modulesets naming the
+        module name it under the new name. The name of another module is a 409.
+        Requires the CompManager privilege. Logged.
+      parameters:
+        - in: path
+          name: name
+          required: true
+          description: The name of the module, without its order
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComplianceModuleRename'
+      tags:
+        - collector
+      responses:
+        200:
+          description: The module as changed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceModuleDetail'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        409:
+          $ref: '#/components/responses/409'
+        412:
+          description: The module changed since the revision given, base.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+  /compliance/modules/{name}/mode:
+    post:
+      operationId: PostComplianceModuleMode
+      description: |
+        Make a file of a directory module executable, or not, in a commit authored by
+        the user, from the revision base: a binary file, say. The entry stays
+        executable. Requires the CompManager privilege. Logged.
+      parameters:
+        - in: path
+          name: name
+          required: true
+          description: The name of the module, without its order
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComplianceModuleFileMode'
+      tags:
+        - collector
+      responses:
+        200:
+          description: The module as changed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceModuleDetail'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        409:
+          $ref: '#/components/responses/409'
+        412:
+          description: The module changed since the revision given, base.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+  /compliance/modules/{name}/archive:
+    get:
+      operationId: GetComplianceModuleArchive
+      description: |
+        The module as a gzipped tarball rooted at its entry, S<order>-<name>: what an
+        upload replacing it takes back.
+      parameters:
+        - in: path
+          name: name
+          required: true
+          description: The name of the module, without its order
+          schema:
+            type: string
+      tags:
+        - collector
+      responses:
+        200:
+          description: The archive.
+          content:
+            application/gzip:
+              schema:
+                type: string
+                format: binary
+        401:
+          $ref: '#/components/responses/401'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+    put:
+      operationId: PutComplianceModuleArchive
+      description: |
+        Replace every file of a module with those of an archive, a .tar.gz or a .zip,
+        in a commit authored by the user: a script module becomes a directory. The
+        rules of a directory module apply. base is the revision the change was made
+        from. Requires the CompManager privilege. Logged.
+      parameters:
+        - in: path
+          name: name
+          required: true
+          description: The name of the module, without its order
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [base, archive]
+              properties:
+                base:
+                  type: string
+                message:
+                  type: string
+                archive:
+                  type: string
+                  format: binary
+      tags:
+        - collector
+      responses:
+        200:
+          description: The module as changed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceModuleDetail'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        409:
+          $ref: '#/components/responses/409'
+        412:
+          description: The module changed since the revision given, base.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+  /compliance/modules_repo/current:
+    get:
+      operationId: GetComplianceModulesArchive
+      description: |
+        The compliance modules as the agents install them: a gzipped tarball of the
+        repository, rooted at compliance/, its files owned by root. Set node.repocomp
+        to the URL of /compliance/modules_repo for om node updatecomp to fetch it.
+        For an authenticated node, or user; for anyone when the server setting
+        server.compliance_modules.anonymous_download is true, for the v2 agents
+        fetching it without credentials. 404 before the first module.
+      tags:
+        - collector
+      responses:
+        200:
+          description: The archive.
+          headers:
+            X-Compliance-Modules-Commit:
+              description: The commit of the repository archived.
+              schema:
+                type: string
+          content:
+            application/gzip:
+              schema:
+                type: string
+                format: binary
+        401:
+          $ref: '#/components/responses/401'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+        - { }
+  /compliance/agent/data:
+    get:
+      operationId: GetComplianceAgentData
+      description: |
+        What the agent of the calling node needs for a compliance run: the
+        modulesets and the resolved rulesets of the node, or of one of its objects
+        with path, and the relations of the modulesets. The ruleset osvc_collector
+        holds the ruleset_md5 the logs of the run refer to.
+      parameters:
+        - $ref: '#/components/parameters/inQueryComplianceAgentPath'
+        - in: query
+          name: moduleset
+          description: Use these modulesets rather than the attached ones.
+          schema:
+            type: array
+            items:
+              type: string
+      tags:
+        - collector
+      responses:
+        200:
+          description: The data of the run.
+          content:
+            application/json:
+              schema:
+                type: object
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+  /compliance/agent/logs:
+    post:
+      operationId: PostComplianceAgentLogs
+      description: |
+        Record the module results of a compliance run of the calling node, or of
+        one of its objects with path. A check also updates the compliance status.
+      parameters:
+        - $ref: '#/components/parameters/inQueryComplianceAgentPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/ComplianceAgentLog'
+      tags:
+        - collector
+      responses:
+        202:
+          $ref: '#/components/responses/ComplianceAgentInfo'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+  /compliance/agent/modulesets:
+    get:
+      operationId: GetComplianceAgentModulesets
+      description: |
+        The names of the modulesets the calling node may attach, sorted.
+      parameters:
+        - in: query
+          name: pattern
+          description: A sql LIKE pattern on the name. Default %.
+          schema:
+            type: string
+      tags:
+        - collector
+      responses:
+        200:
+          description: The names.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+  /compliance/agent/modulesets/{name}:
+    post:
+      operationId: PostComplianceAgentModuleset
+      description: |
+        Attach a moduleset to the calling node, or to one of its objects with path.
+        A moduleset already attached is no error.
+      parameters:
+        - $ref: '#/components/parameters/inPathComplianceAgentName'
+        - $ref: '#/components/parameters/inQueryComplianceAgentPath'
+      tags:
+        - collector
+      responses:
+        200:
+          $ref: '#/components/responses/ComplianceAgentInfo'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+    delete:
+      operationId: DeleteComplianceAgentModuleset
+      description: |
+        Detach a moduleset from the calling node, or from one of its objects with
+        path. The name all detaches every moduleset. A moduleset not attached is no
+        error.
+      parameters:
+        - $ref: '#/components/parameters/inPathComplianceAgentName'
+        - $ref: '#/components/parameters/inQueryComplianceAgentPath'
+      tags:
+        - collector
+      responses:
+        200:
+          $ref: '#/components/responses/ComplianceAgentInfo'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+  /compliance/agent/rulesets:
+    get:
+      operationId: GetComplianceAgentRulesets
+      description: |
+        The names of the rulesets the calling node may attach, sorted.
+      parameters:
+        - in: query
+          name: pattern
+          description: A sql LIKE pattern on the name. Default %.
+          schema:
+            type: string
+      tags:
+        - collector
+      responses:
+        200:
+          description: The names.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+  /compliance/agent/rulesets/{name}:
+    post:
+      operationId: PostComplianceAgentRuleset
+      description: |
+        Attach a ruleset to the calling node, or to one of its objects with path.
+        A ruleset already attached is no error.
+      parameters:
+        - $ref: '#/components/parameters/inPathComplianceAgentName'
+        - $ref: '#/components/parameters/inQueryComplianceAgentPath'
+      tags:
+        - collector
+      responses:
+        200:
+          $ref: '#/components/responses/ComplianceAgentInfo'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+    delete:
+      operationId: DeleteComplianceAgentRuleset
+      description: |
+        Detach a ruleset from the calling node, or from one of its objects with
+        path. The name all detaches every ruleset. A ruleset not attached is no
+        error.
+      parameters:
+        - $ref: '#/components/parameters/inPathComplianceAgentName'
+        - $ref: '#/components/parameters/inQueryComplianceAgentPath'
+      tags:
+        - collector
+      responses:
+        200:
+          $ref: '#/components/responses/ComplianceAgentInfo'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
   /compliance/modulesets:
     get:
       operationId: GetComplianceModulesets
@@ -17282,6 +19435,42 @@ paths:
         - bearerAuth: [ ]
 
   /compliance/modulesets_nodes:
+    get:
+      operationId: GetComplianceModulesetsNodes
+      description: |
+        List the nodes the caller may see with the modulesets attached to them: one row per node
+        and moduleset, and one with no moduleset for a node that has none, as the
+        historical collector's "node modulesets" table (comp_modulesets_nodes). The props are those of the nodes
+        list, plus the id and the name of the moduleset;
+        filter on its name with "empty" to find the nodes without any. The
+        session filterset applies.
+      parameters:
+        - $ref: '#/components/parameters/inQueryProps'
+        - $ref: '#/components/parameters/inQueryLimit'
+        - $ref: '#/components/parameters/inQueryOffset'
+        - $ref: '#/components/parameters/inQueryMeta'
+        - $ref: '#/components/parameters/inQueryStats'
+        - $ref: '#/components/parameters/inQueryOrderby'
+        - $ref: '#/components/parameters/inQueryFilter'
+        - $ref: '#/components/parameters/inQueryGroupby'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompNodeModulesetListResponse'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
     post:
       operationId: PostComplianceModulesetsNodes
       description: |
@@ -17372,6 +19561,42 @@ paths:
         - bearerAuth: [ ]
 
   /compliance/modulesets_services:
+    get:
+      operationId: GetComplianceModulesetsServices
+      description: |
+        List the services the caller may see with the modulesets attached to them or to their encapsulated part (slave): one row per service
+        and moduleset, and one with no moduleset for a service that has none, as the
+        historical collector's "service modulesets" table (comp_modulesets_services). The props are those of the services
+        list, plus the id and the name of the moduleset, and slave;
+        filter on its name with "empty" to find the services without any. The
+        session filterset applies.
+      parameters:
+        - $ref: '#/components/parameters/inQueryProps'
+        - $ref: '#/components/parameters/inQueryLimit'
+        - $ref: '#/components/parameters/inQueryOffset'
+        - $ref: '#/components/parameters/inQueryMeta'
+        - $ref: '#/components/parameters/inQueryStats'
+        - $ref: '#/components/parameters/inQueryOrderby'
+        - $ref: '#/components/parameters/inQueryFilter'
+        - $ref: '#/components/parameters/inQueryGroupby'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompServiceModulesetListResponse'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
     post:
       operationId: PostComplianceModulesetsServices
       description: |
@@ -17639,6 +19864,73 @@ paths:
         - basicAuth: [ ]
         - bearerAuth: [ ]
 
+  /compliance/designer/commits:
+    post:
+      operationId: PostComplianceDesignerCommits
+      description: |
+        Save the changes of the compliance designer, all or nothing: the operations
+        are applied in their order, in one transaction, each with the checks of its
+        single route, which see the changes of the operations before it. The first
+        refused rolls them all back: the answer is its status, with its index. An
+        operation with nothing to do (a group or a child already attached) is no
+        refusal.
+
+        An object created by an operation (create, clone) is named by the next ones
+        by the temporary reference the operation gives it in `as`, starting with
+        "tmp:"; the answer maps each to the id of the object created. Any other
+        object is named by its id or its name, as it is before the operation.
+
+        Around the changes, the compliance history records two versions: before,
+        the changes made elsewhere since its last version (`baseline_message`),
+        after, those of this commit (`message`). No version is recorded when
+        nothing changed. A failure to record a version does not undo the changes:
+        it is told in `version_error`. Requires the CompManager privilege.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComplianceDesignerCommitInput'
+      tags:
+        - collector
+      responses:
+        200:
+          description: The operations are all applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceDesignerCommitResult'
+        400:
+          description: The body is invalid, or an operation was refused as such.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceDesignerRefusal'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          description: The user is no CompManager, or an operation was refused.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceDesignerRefusal'
+        404:
+          description: An object an operation names does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceDesignerRefusal'
+        409:
+          description: An operation conflicts with the current state, a name taken say.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceDesignerRefusal'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
   /compliance/history:
     get:
       operationId: GetComplianceHistory
@@ -17782,9 +20074,643 @@ paths:
         - basicAuth: [ ]
         - bearerAuth: [ ]
 
+  /orchestrations:
+    get:
+      operationId: GetOrchestrations
+      description: |
+        The orchestrations, by name unless sorted otherwise, as a collector list:
+        props, filters, sort, pagination and stats. Each with the JSON of its
+        steps (a filter on steps reads the actions of the steps) and its last
+        run. Manager only.
+      parameters:
+        - $ref: '#/components/parameters/inQueryProps'
+        - $ref: '#/components/parameters/inQueryLimit'
+        - $ref: '#/components/parameters/inQueryOffset'
+        - $ref: '#/components/parameters/inQueryMeta'
+        - $ref: '#/components/parameters/inQueryStats'
+        - $ref: '#/components/parameters/inQueryOrderby'
+        - $ref: '#/components/parameters/inQueryFilter'
+        - $ref: '#/components/parameters/inQueryGroupby'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestrationListResponse'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+    post:
+      operationId: PostOrchestration
+      description: |
+        Create an orchestration: an ordered list of steps, each one agent action on a
+        set of targets. The steps are checked as a whole (see OrchestrationStep):
+        400 names the first one that is not valid. 409 when the name is taken.
+        Manager only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrchestrationInput'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Orchestration'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        409:
+          $ref: '#/components/responses/409'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /orchestrations/check:
+    post:
+      operationId: PostOrchestrationCheck
+      description: |
+        Resolve the targets of each step of an orchestration, saved or not, as a run
+        starting now would, and check each one as the action queue would: the
+        action is accepted for the kind of target, the target exists and an agent
+        can be reached for it. What the check finds is not stored. Manager only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrchestrationInput'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestrationCheckResponse'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /orchestrations/{orchestration_id}:
+    parameters:
+      - $ref: '#/components/parameters/inPathOrchestrationId'
+    get:
+      operationId: GetOrchestration
+      description: An orchestration and its steps. Manager only.
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Orchestration'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+    put:
+      operationId: PutOrchestration
+      description: |
+        Replace an orchestration, its name, description and steps, checked as on
+        creation. Its past and running runs keep the plan they started with.
+        Manager only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrchestrationInput'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Orchestration'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        409:
+          $ref: '#/components/responses/409'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+    delete:
+      operationId: DeleteOrchestration
+      description: |
+        Delete an orchestration. Its runs stay, with the plan they ran; a running run
+        goes on. Manager only.
+      tags:
+        - collector
+      responses:
+        200:
+          $ref: '#/components/responses/200'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /orchestrations/{orchestration_id}/runs:
+    parameters:
+      - $ref: '#/components/parameters/inPathOrchestrationId'
+    post:
+      operationId: PostOrchestrationRun
+      description: |
+        Start a run of the orchestration: its steps are frozen in the run, the
+        filtersets resolved now, and the first step starts at once. The steps
+        then run one after the other, the next starting when every target of
+        the previous one succeeded. A target fails when its action returns
+        non-zero, is refused by the action queue, is cancelled or outlives the
+        time limit of its step; the run then stops: the targets not started and
+        the next steps do not run. 400 when a step matches no target. Manager
+        only.
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestrationRun'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /orchestration_runs:
+    get:
+      operationId: GetOrchestrationRuns
+      description: |
+        The runs of the orchestrations, the latest first unless sorted otherwise,
+        as a collector list: props, filters, sort, pagination and stats. Each with
+        the count of its steps and of those done, and its duration; the runs of
+        one orchestration with the filter orchestration_id:eq:<id>. The steps and
+        targets of a run are read by GET /orchestration_runs/{run_id}. Manager
+        only.
+      parameters:
+        - $ref: '#/components/parameters/inQueryProps'
+        - $ref: '#/components/parameters/inQueryLimit'
+        - $ref: '#/components/parameters/inQueryOffset'
+        - $ref: '#/components/parameters/inQueryMeta'
+        - $ref: '#/components/parameters/inQueryStats'
+        - $ref: '#/components/parameters/inQueryOrderby'
+        - $ref: '#/components/parameters/inQueryFilter'
+        - $ref: '#/components/parameters/inQueryGroupby'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestrationRunListResponse'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /orchestration_runs/{run_id}:
+    parameters:
+      - $ref: '#/components/parameters/inPathOrchestrationRunId'
+    get:
+      operationId: GetOrchestrationRun
+      description: |
+        A run, its steps and the targets of each step, with the status, the
+        return code and the output of the action of each target. Manager only.
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestrationRun'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /orchestration_runs/{run_id}/stop:
+    parameters:
+      - $ref: '#/components/parameters/inPathOrchestrationRunId'
+    post:
+      operationId: PostOrchestrationRunStop
+      description: |
+        Stop a running run: the targets not started yet do not run, nor the next
+        steps, and the actions still waiting in the queue are cancelled. An action
+        an agent already runs cannot be interrupted: it goes on and its result is
+        recorded. 409 when the run is not running. Manager only.
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestrationRun'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        409:
+          $ref: '#/components/responses/409'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /orchestration_runs/{run_id}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/inPathOrchestrationRunId'
+    post:
+      operationId: PostOrchestrationRunCancel
+      description: |
+        Cancel a run, for good: a running run stops as with POST
+        /orchestration_runs/{run_id}/stop, a failed or stopped run ends there.
+        A cancelled run neither resumes nor goes on past its step. An action an
+        agent already runs goes on and its result is recorded. 409 when the run
+        is neither running, failed nor stopped. Manager only.
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestrationRun'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        409:
+          $ref: '#/components/responses/409'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /orchestration_runs/{run_id}/continue:
+    parameters:
+      - $ref: '#/components/parameters/inPathOrchestrationRunId'
+    post:
+      operationId: PostOrchestrationRunContinue
+      description: |
+        Acknowledge the failed or stopped step of a failed or stopped run and
+        go on with the next step: the step becomes acknowledged, with the comment, which is
+        required, the author and the date; its targets keep their outcome. The
+        next steps run with the targets resolved when the run started; when the
+        failed step was the last, the run ends as succeeded. 400 without a
+        comment; 409 when the run is neither failed nor stopped, or an action of
+        it still runs.
+        Manager only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrchestrationRunContinueInput'
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestrationRun'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        409:
+          $ref: '#/components/responses/409'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /orchestration_runs/{run_id}/resume:
+    parameters:
+      - $ref: '#/components/parameters/inPathOrchestrationRunId'
+    post:
+      operationId: PostOrchestrationRunResume
+      description: |
+        Resume a failed or stopped run from the step it stopped at: the targets of
+        that step that did not succeed run again, then the next steps, with the
+        targets resolved when the run started. 409 when the run is not failed or
+        stopped, or an action of it still runs. Manager only.
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestrationRun'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        409:
+          $ref: '#/components/responses/409'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /nodes/delete:
+    post:
+      operationId: PostNodesDelete
+      description: |
+        Delete nodes by id or name, up to 1000, each as DELETE /nodes/{node_id}
+        does: its checks (responsibility for the node), its transaction, its
+        cascade and its audit entry; a refusal does not stop the others. One change
+        event for the batch. Requires the NodeManager privilege.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdsInput'
+      tags:
+        - collector
+      responses:
+        200:
+          description: The outcome of each object, in the order sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResult'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /services/delete:
+    post:
+      operationId: PostServicesDelete
+      description: |
+        Delete services by id or name, up to 1000, each as DELETE /services/{svc_id}
+        does: responsibility for the service, its transaction, its cascade on the
+        instances and alerts and its audit entry; a refusal does not stop the
+        others. One change event for the batch.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdsInput'
+      tags:
+        - collector
+      responses:
+        200:
+          description: The outcome of each object, in the order sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResult'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /services_instances/delete:
+    post:
+      operationId: PostServicesInstancesDelete
+      description: |
+        Delete service instances, up to 1000, each as
+        DELETE /services/{svc_id}/instances/{node_id} does: responsibility for the
+        service, its transaction and its audit entry; a refusal does not stop the
+        others. The id of an outcome is "svc_id@node_id". One change event for the
+        batch.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstancesInput'
+      tags:
+        - collector
+      responses:
+        200:
+          description: The outcome of each object, in the order sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResult'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /services_actions/ack:
+    post:
+      operationId: PostServicesActionsAck
+      description: |
+        Acknowledge failed agent actions, up to 1000, each as
+        POST /services_actions/{action_id} does (responsibility for the service, an
+        action not failed or acknowledged already skipped, its audit entry), with
+        the same comment. The unacknowledged errors of each instance concerned and
+        its "action errors" alert are counted once for the batch, and one change
+        event sent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionsAckInput'
+      tags:
+        - collector
+      responses:
+        200:
+          description: The outcome of each object, in the order sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResult'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
+  /checks/live/batch:
+    post:
+      operationId: PostChecksLiveBatch
+      description: |
+        Apply one change to checks by id, up to 1000: set_thresholds sets
+        chk_low and chk_high (a bound not given keeps the one the check has),
+        reset_thresholds removes the thresholds set on them, delete deletes them,
+        each as its single route does (responsibility for the node, its audit
+        entry). The checks of each node concerned are refreshed once for the batch,
+        and one change event sent. Requires the CheckExec privilege.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChecksBatchInput'
+      tags:
+        - collector
+      responses:
+        200:
+          description: The outcome of each object, in the order sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResult'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
 components:
 
   responses:
+    ComplianceAgentInfo:
+      description: What was done.
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - info
+            properties:
+              info:
+                type: string
     '200':
       description: OK
       content:
@@ -17849,6 +20775,24 @@ components:
             $ref: "#/components/schemas/Problem"
 
   schemas:
+    ComplianceAgentLog:
+      type: object
+      required:
+        - module
+        - status
+        - log
+        - action
+      properties:
+        module:
+          type: string
+        status:
+          type: integer
+        log:
+          type: string
+        action:
+          type: string
+        rset_md5:
+          type: string
     AuthInfo:
       type: object
       required: [basic, oidc, session]
@@ -18581,6 +21525,204 @@ components:
               items:
                 $ref: '#/components/schemas/PackageDiffNode'
 
+    CompNodeModulesetRow:
+      description: A node and a moduleset attached to it; no moduleset on the row of a node that has none
+      allOf:
+        - $ref: '#/components/schemas/NodeRow'
+        - type: object
+          properties:
+            modset_id:
+              type: integer
+              nullable: true
+            modset_name:
+              type: string
+              nullable: true
+
+    CompNodeRulesetRow:
+      description: A node and a ruleset attached to it; no ruleset on the row of a node that has none
+      allOf:
+        - $ref: '#/components/schemas/NodeRow'
+        - type: object
+          properties:
+            ruleset_id:
+              type: integer
+              nullable: true
+            ruleset_name:
+              type: string
+              nullable: true
+
+    CompServiceModulesetRow:
+      description: A service and a moduleset attached to it, or to its encapsulated part when slave is "T"
+      allOf:
+        - $ref: '#/components/schemas/ServiceRow'
+        - type: object
+          properties:
+            modset_id:
+              type: integer
+              nullable: true
+            modset_name:
+              type: string
+              nullable: true
+            slave:
+              type: string
+              nullable: true
+              description: '"T": attached to the encapsulated part of the service'
+
+    CompServiceRulesetRow:
+      description: A service and a ruleset attached to it, or to its encapsulated part when slave is "T"
+      allOf:
+        - $ref: '#/components/schemas/ServiceRow'
+        - type: object
+          properties:
+            ruleset_id:
+              type: integer
+              nullable: true
+            ruleset_name:
+              type: string
+              nullable: true
+            slave:
+              type: string
+              nullable: true
+              description: '"T": attached to the encapsulated part of the service'
+
+    CompNodeModulesetListResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          oneOf:
+            - type: array
+              items:
+                $ref: '#/components/schemas/CompNodeModulesetRow'
+            - type: object
+              additionalProperties:
+                type: object
+                additionalProperties:
+                  type: integer
+        meta:
+          $ref: '#/components/schemas/ListMeta'
+
+    CompNodeRulesetListResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          oneOf:
+            - type: array
+              items:
+                $ref: '#/components/schemas/CompNodeRulesetRow'
+            - type: object
+              additionalProperties:
+                type: object
+                additionalProperties:
+                  type: integer
+        meta:
+          $ref: '#/components/schemas/ListMeta'
+
+    CompServiceModulesetListResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          oneOf:
+            - type: array
+              items:
+                $ref: '#/components/schemas/CompServiceModulesetRow'
+            - type: object
+              additionalProperties:
+                type: object
+                additionalProperties:
+                  type: integer
+        meta:
+          $ref: '#/components/schemas/ListMeta'
+
+    CompServiceRulesetListResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          oneOf:
+            - type: array
+              items:
+                $ref: '#/components/schemas/CompServiceRulesetRow'
+            - type: object
+              additionalProperties:
+                type: object
+                additionalProperties:
+                  type: integer
+        meta:
+          $ref: '#/components/schemas/ListMeta'
+
+    ComplianceAttachmentPair:
+      type: object
+      description: A moduleset or a ruleset, and the node or the service to attach it to or detach it from
+      required: [object, object_id]
+      properties:
+        object:
+          type: string
+          enum: [moduleset, ruleset]
+        object_id:
+          type: string
+          description: Id of the moduleset or of the ruleset
+        node_id:
+          type: string
+          description: The node; exactly one of node_id and svc_id
+        svc_id:
+          type: string
+          description: The service; exactly one of node_id and svc_id
+        slave:
+          type: boolean
+          description: For a service, its encapsulated part rather than the service itself
+
+    ComplianceAttachmentsInput:
+      type: object
+      required: [action, pairs]
+      properties:
+        action:
+          type: string
+          enum: [attach, detach]
+        pairs:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            $ref: '#/components/schemas/ComplianceAttachmentPair'
+
+    ComplianceAttachmentOutcome:
+      type: object
+      required: [object, object_id, status, info]
+      properties:
+        object:
+          type: string
+          enum: [moduleset, ruleset]
+        object_id:
+          type: string
+        node_id:
+          type: string
+        svc_id:
+          type: string
+        slave:
+          type: boolean
+        status:
+          type: integer
+          description: The status the single route answers with, 202 when done
+        info:
+          type: string
+          description: Its message, or why the pair was refused
+
+    ComplianceAttachmentsResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComplianceAttachmentOutcome'
+
     ComplianceStatusRow:
       type: object
       description: |
@@ -18692,6 +21834,299 @@ components:
         modset_updated:
           type: string
 
+    ComplianceModuleCommit:
+      type: object
+      required: [id, author, date, subject]
+      properties:
+        id:
+          type: string
+        author:
+          type: string
+          description: '"Name <email>"'
+        date:
+          type: string
+          description: ISO 8601
+        subject:
+          type: string
+    ComplianceModule:
+      type: object
+      required: [name, path, order, kind, entry, runnable, issue]
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+          description: The name of its entry in the compliance directory, S<order>-<name>
+        order:
+          type: integer
+        kind:
+          type: string
+          enum: [script, directory]
+          x-enum-varnames: [ComplianceModuleKindScript, ComplianceModuleKindDirectory]
+        entry:
+          type: string
+          description: The file the agent runs, relative to path; empty for a script, and for a directory holding neither main nor scripts/main
+        runnable:
+          type: boolean
+          description: Whether an agent can run it, an executable file
+        issue:
+          $ref: '#/components/schemas/ComplianceModuleIssue'
+        changed:
+          $ref: '#/components/schemas/ComplianceModuleCommit'
+    ComplianceModuleIssue:
+      type: string
+      description: |
+        Why an agent cannot run the module, empty when it can: not_executable, the
+        file to run is not; no_entry, a directory holding neither main nor
+        scripts/main; two_entries, a directory holding both, which the agents refuse
+        to choose between.
+      enum: ["", not_executable, no_entry, two_entries]
+      x-enum-varnames: [ComplianceModuleIssueNone, ComplianceModuleIssueNotExecutable, ComplianceModuleIssueNoEntry, ComplianceModuleIssueTwoEntries]
+    ComplianceModuleList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComplianceModule'
+    ComplianceModuleFile:
+      type: object
+      required: [path, size, executable]
+      properties:
+        path:
+          type: string
+          description: Relative to the module, empty for a script
+        size:
+          type: integer
+          format: int64
+        executable:
+          type: boolean
+    ComplianceModuleModuleset:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+    ComplianceModuleDetail:
+      type: object
+      required: [name, path, order, kind, entry, runnable, issue, files, history, modulesets]
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+        order:
+          type: integer
+        kind:
+          type: string
+          enum: [script, directory]
+          x-enum-varnames: [ComplianceModuleDetailKindScript, ComplianceModuleDetailKindDirectory]
+        entry:
+          type: string
+        runnable:
+          type: boolean
+        issue:
+          $ref: '#/components/schemas/ComplianceModuleIssue'
+        changed:
+          $ref: '#/components/schemas/ComplianceModuleCommit'
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComplianceModuleFile'
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComplianceModuleCommit'
+        modulesets:
+          type: array
+          description: The modulesets naming the module, visible to the user or not
+          items:
+            $ref: '#/components/schemas/ComplianceModuleModuleset'
+    ComplianceModuleFileContent:
+      type: object
+      required: [path, content, truncated, binary]
+      properties:
+        path:
+          type: string
+        content:
+          type: string
+          description: The text of the file; empty for a binary file
+        truncated:
+          type: boolean
+          description: Cut at 1 MiB
+        binary:
+          type: boolean
+    ComplianceModuleCreate:
+      type: object
+      required: [name, order]
+      properties:
+        name:
+          type: string
+        order:
+          type: integer
+        kind:
+          type: string
+          enum: [script, directory]
+          x-enum-varnames: [ComplianceModuleCreateKindScript, ComplianceModuleCreateKindDirectory]
+          description: script by default
+        content:
+          type: string
+          description: 'The script of a script module, starting with "#!"'
+        files:
+          type: array
+          description: The files of a directory module
+          items:
+            $ref: '#/components/schemas/ComplianceModuleFileInput'
+        message:
+          type: string
+          description: The message of the commit; "add <name>" when empty
+    ComplianceModuleFileInput:
+      type: object
+      required: [path, content]
+      properties:
+        path:
+          type: string
+          description: Relative to the module
+        content:
+          type: string
+        encoding:
+          type: string
+          enum: [text, base64]
+          x-enum-varnames: [ComplianceModuleFileInputEncodingText, ComplianceModuleFileInputEncodingBase64]
+          description: text by default; base64 for a binary file
+        executable:
+          type: boolean
+    ComplianceModuleFileWrite:
+      type: object
+      required: [path, content, base]
+      properties:
+        path:
+          type: string
+          description: Relative to the module; empty for the script of a script module
+        content:
+          type: string
+        encoding:
+          type: string
+          enum: [text, base64]
+          x-enum-varnames: [ComplianceModuleFileWriteEncodingText, ComplianceModuleFileWriteEncodingBase64]
+          description: text by default; base64 for a binary file
+        executable:
+          type: boolean
+        base:
+          type: string
+          description: The last commit of the module as read
+        message:
+          type: string
+          description: The message of the commit
+    ComplianceModuleFileMove:
+      type: object
+      required: [from, to, base]
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+        base:
+          type: string
+          description: The last commit of the module as read
+        message:
+          type: string
+          description: The message of the commit
+    ComplianceModuleChange:
+      type: object
+      required: [base]
+      properties:
+        base:
+          type: string
+          description: The last commit of the module as read
+        message:
+          type: string
+          description: The message of the commit
+    ComplianceModuleRename:
+      type: object
+      required: [name, order, base]
+      properties:
+        name:
+          type: string
+          description: The new name, or the same
+        order:
+          type: integer
+          description: The new order, or the same
+        base:
+          type: string
+          description: The last commit of the module as read
+        message:
+          type: string
+          description: The message of the commit
+    ComplianceModuleFileMode:
+      type: object
+      required: [path, executable, base]
+      properties:
+        path:
+          type: string
+        executable:
+          type: boolean
+        base:
+          type: string
+          description: The last commit of the module as read
+        message:
+          type: string
+          description: The message of the commit
+    ComplianceModuleRestore:
+      type: object
+      required: [rev, base]
+      properties:
+        rev:
+          type: string
+          description: The version to restore, a commit of the history of the module
+        base:
+          type: string
+          description: The last commit of the module as read
+        message:
+          type: string
+          description: The message of the commit
+    ComplianceModuleFileDiff:
+      type: object
+      required: [path, status, binary, added, deleted, diff, truncated]
+      properties:
+        path:
+          type: string
+          description: Relative to the module, empty for the script of a script module
+        status:
+          type: string
+          enum: [added, removed, modified]
+          x-enum-varnames: [ComplianceModuleFileDiffStatusAdded, ComplianceModuleFileDiffStatusRemoved, ComplianceModuleFileDiffStatusModified]
+          description: added, in the current version only; removed, in the earlier one only
+        binary:
+          type: boolean
+        was_executable:
+          type: boolean
+          description: For a file whose mode changed, executable in the earlier version
+        is_executable:
+          type: boolean
+          description: For a file whose mode changed, executable now
+        added:
+          type: integer
+        deleted:
+          type: integer
+        diff:
+          type: string
+          description: The unified diff from the earlier version to the current one, hunks only
+        truncated:
+          type: boolean
+    ComplianceModuleVersionDiff:
+      type: object
+      required: [version, files]
+      properties:
+        version:
+          $ref: '#/components/schemas/ComplianceModuleCommit'
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComplianceModuleFileDiff'
     ModulesetListResponse:
       type: object
       required:
@@ -19056,16 +22491,6 @@ components:
           minLength: 1
           maxLength: 80
           description: Control characters are replaced by spaces and whitespace is normalized.
-    AssistantTurnRequest:
-      type: object
-      additionalProperties: false
-      required:
-      - prompt
-      properties:
-        prompt:
-          type: string
-          minLength: 1
-          description: The question of the user, at most 32 KiB, not blank.
     AssistantFeedbackReason:
       type: string
       description: |
@@ -19132,22 +22557,6 @@ components:
         updated_at:
           type: string
           format: date-time
-    AssistantConfirmationRequest:
-      type: object
-      additionalProperties: false
-      required:
-      - confirmation_id
-      - decision
-      properties:
-        confirmation_id:
-          type: string
-          minLength: 1
-          description: The `id` of the confirmation.
-        decision:
-          type: string
-          enum:
-          - approve
-          - reject
     AssistantConfirmation:
       type: object
       required:
@@ -19176,6 +22585,16 @@ components:
               type: boolean
         arguments:
           description: The exact arguments of the call that runs if the user approves it.
+        argument_types:
+          type: object
+          description: |
+            The MIME type of the arguments whose value is text in a known format,
+            by argument name: application/yaml for the definition of a form given
+            to create_form or update_form, say. An argument absent from it is
+            plain text, or a JSON value when it is not a string. A client renders
+            each argument after its type, never after its content.
+          additionalProperties:
+            type: string
         expires_at:
           type: string
           format: date-time
@@ -19219,67 +22638,269 @@ components:
         next_cursor:
           type: string
           description: Pass it as `before` to read the previous page; empty when there is none.
-    AssistantStreamEvent:
+    AssistantRunInput:
       type: object
+      description: |
+        The AG-UI RunAgentInput of a run. The agent reads threadId, runId,
+        protocolVersion, the last message, a message of the user, the ids of the
+        others, the tools of the client and resume; not the state, the context or
+        the forwarded properties.
+      required:
+      - threadId
+      - runId
+      - messages
+      properties:
+        threadId:
+          type: string
+          description: The id of the conversation of the route.
+        runId:
+          type: string
+          maxLength: 128
+          description: The id the client gives the run, printable, without spaces.
+        protocolVersion:
+          type: string
+          description: The version of AG-UI the client speaks, MAJOR.MINOR.
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssistantRunMessage'
+        tools:
+          type: array
+          maxItems: 16
+          description: The tools of the client, offered to the model and run by the client.
+          items:
+            type: object
+            required:
+            - name
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+              parameters:
+                type: object
+        resume:
+          type: array
+          maxItems: 1
+          description: The decision on the action the conversation waits on.
+          items:
+            type: object
+            required:
+            - interruptId
+            - status
+            properties:
+              interruptId:
+                type: string
+                description: The id of the interrupt, that of the confirmation.
+              status:
+                type: string
+                description: resolved, the payload approving the call or not; or cancelled, rejecting it.
+              payload:
+                type: object
+                additionalProperties: false
+                required:
+                - approved
+                properties:
+                  approved:
+                    type: boolean
+      additionalProperties: true
+    AssistantRunMessage:
+      type: object
+      description: A message of the thread, as AG-UI gives it; the agent reads the text of the last one, a prompt, and the ids of the others.
+      required:
+      - id
+      - role
+      properties:
+        id:
+          type: string
+        role:
+          type: string
+          description: user, assistant, tool, system or developer.
+        content:
+          type: string
+        toolCallId:
+          type: string
+        error:
+          type: string
+        toolCalls:
+          type: array
+          items:
+            type: object
+            required:
+            - id
+            - function
+            properties:
+              id:
+                type: string
+              type:
+                type: string
+              function:
+                type: object
+                required:
+                - name
+                - arguments
+                properties:
+                  name:
+                    type: string
+                  arguments:
+                    type: string
+    AssistantRunEvent:
+      type: object
+      description: |
+        One AG-UI event of a run. RUN_STARTED, then the answers of the model
+        (TEXT_MESSAGE_START, _CONTENT, _END), the tools it calls
+        (TOOL_CALL_START, _ARGS, _END, then TOOL_CALL_RESULT), a
+        MESSAGES_SNAPSHOT for a client out of phase, CUSTOM notes for the
+        developer, and RUN_FINISHED or RUN_ERROR.
       required:
       - type
-      description: One event of a streamed turn. The SSE event name equals `type`.
       properties:
         type:
           type: string
           enum:
-          - text_delta
-          - tool_started
-          - tool_finished
-          - usage
-          - completed
-          - confirmation_required
-          - error
-        iteration:
+          - RUN_STARTED
+          - MESSAGES_SNAPSHOT
+          - TEXT_MESSAGE_START
+          - TEXT_MESSAGE_CONTENT
+          - TEXT_MESSAGE_END
+          - TOOL_CALL_START
+          - TOOL_CALL_ARGS
+          - TOOL_CALL_END
+          - TOOL_CALL_RESULT
+          - CUSTOM
+          - RUN_FINISHED
+          - RUN_ERROR
+        timestamp:
           type: integer
-          minimum: 1
-          description: The model iteration of the turn.
-        text_delta:
+          format: int64
+          description: Milliseconds since the epoch.
+        threadId:
           type: string
-          description: '`text_delta`: the next piece of the answer.'
-        tool_name:
+        runId:
           type: string
-          description: '`tool_started`, `tool_finished`: the MCP tool.'
-        tool_error:
-          type: boolean
-          description: '`tool_finished`: whether the tool failed.'
-        usage:
+        protocolVersion:
+          type: string
+          description: RUN_STARTED, the version of AG-UI of the agent.
+        messageId:
+          type: string
+          description: The message of a text, `<turn id>:<sequence>`, or of a tool result.
+        role:
+          type: string
+        delta:
+          type: string
+          description: TEXT_MESSAGE_CONTENT, a piece of the answer; TOOL_CALL_ARGS, the JSON arguments of the call.
+        toolCallId:
+          type: string
+        toolCallName:
+          type: string
+        parentMessageId:
+          type: string
+        content:
+          type: string
+          description: TOOL_CALL_RESULT, the JSON result the model read.
+        messages:
+          type: array
+          description: MESSAGES_SNAPSHOT, the thread as the model reads it.
+          items:
+            $ref: '#/components/schemas/AssistantRunMessage'
+        name:
+          type: string
+          description: CUSTOM, its name, such as opensvc.warning.
+        value:
+          description: CUSTOM, its value.
+        outcome:
+          $ref: '#/components/schemas/AssistantRunOutcome'
+        result:
           type: object
-          description: '`usage`: the tokens of one model call.'
+          description: RUN_FINISHED of a completed turn, its id, for its feedback.
           properties:
-            input_tokens:
-              type: integer
-            output_tokens:
-              type: integer
-            total_tokens:
-              type: integer
-        finish_reason:
-          type: string
-          enum:
-          - completed
-          - tool_calls
-          - length
-          - content_filter
-          - other
-          description: '`completed`: why the model stopped.'
-        confirmation:
-          $ref: '#/components/schemas/AssistantConfirmation'
-          description: '`confirmation_required`: the action waiting a decision; the turn ends until it is given.'
+            turnId:
+              type: string
+        usage:
+          type: array
+          items:
+            type: object
+            properties:
+              inputTokens:
+                type: integer
+              outputTokens:
+                type: integer
+              totalTokens:
+                type: integer
         code:
           type: string
-          enum:
-          - agent_failed
-          - request_timeout
-          - tool_call_limit
-          description: '`error`: why the turn failed. `tool_call_limit`: the model asked for more than 8 tools in one answer, or more than 16 in the turn.'
+          description: RUN_ERROR, why the run failed (tool_call_limit, request_timeout, tool_name_conflict, agent_failed).
         message:
           type: string
-          description: '`error`: a human-readable message.'
+          description: RUN_ERROR, for the developer.
+    AssistantRunOutcome:
+      type: object
+      description: How RUN_FINISHED ends the run, a success, or an interrupt on the action to confirm.
+      required:
+      - type
+      properties:
+        type:
+          type: string
+          enum:
+          - success
+          - interrupt
+        pendingToolCallIds:
+          type: array
+          items:
+            type: string
+        interrupts:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssistantInterrupt'
+    AssistantInterrupt:
+      type: object
+      description: The confirmation an action waits on; answer it with a run whose resume names its id.
+      required:
+      - id
+      - reason
+      properties:
+        id:
+          type: string
+          description: The id of the confirmation.
+        reason:
+          type: string
+        toolCallId:
+          type: string
+          description: The call to confirm, whose TOOL_CALL_ARGS are the exact arguments that run.
+        message:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        responseSchema:
+          type: object
+        metadata:
+          type: object
+          properties:
+            turnId:
+              type: string
+            tool:
+              type: object
+              required:
+              - name
+              - title
+              - destructive
+              properties:
+                name:
+                  type: string
+                title:
+                  type: string
+                destructive:
+                  type: boolean
+            argumentTypes:
+              type: object
+              additionalProperties:
+                type: string
+              description: The media types of the text arguments, by argument name.
+    AssistantCapabilities:
+      type: object
+      description: The AG-UI AgentCapabilities of the agent.
+      additionalProperties: true
     AssistantError:
       type: object
       required:
@@ -20562,6 +24183,442 @@ components:
         updated:
           type: string
 
+    FormConnectorAuthType:
+      type: string
+      enum: [none, basic, bearer, api_key, oauth2_client_credentials]
+      x-enum-varnames: [FormConnectorAuthNone, FormConnectorAuthBasic, FormConnectorAuthBearer,
+        FormConnectorAuthApiKey, FormConnectorAuthOAuth2ClientCredentials]
+
+    FormConnectorMethod:
+      type: string
+      enum: [GET, POST, PUT, PATCH, DELETE]
+      x-enum-varnames: [FormConnectorMethodGet, FormConnectorMethodPost, FormConnectorMethodPut,
+        FormConnectorMethodPatch, FormConnectorMethodDelete]
+
+    FormConnectorAuth:
+      type: object
+      description: |
+        How the connector authenticates, its settings without the secrets:
+        basic, username (secret password); bearer (secret token); api_key, in and
+        name, the header or query parameter (secret api_key);
+        oauth2_client_credentials, token_url, client_id, scopes (space-separated),
+        audience, auth_style (secret client_secret).
+      required:
+        - type
+      properties:
+        type:
+          $ref: '#/components/schemas/FormConnectorAuthType'
+        username:
+          type: string
+        in:
+          type: string
+          enum: [header, query]
+          x-enum-varnames: [FormConnectorApiKeyInHeader, FormConnectorApiKeyInQuery]
+        name:
+          type: string
+        token_url:
+          type: string
+        client_id:
+          type: string
+        scopes:
+          type: string
+        audience:
+          type: string
+        auth_style:
+          type: string
+          enum: [header, params]
+          x-enum-varnames: [FormConnectorAuthStyleHeader, FormConnectorAuthStyleParams]
+
+    FormConnectorTLS:
+      type: object
+      description: |
+        The TLS settings: the PEM certificates of the authorities to trust instead
+        of the system ones, the PEM client certificate of a mutual TLS (its key a
+        secret, client_key), the name to check the server certificate against.
+      properties:
+        ca_bundle:
+          type: string
+        client_cert:
+          type: string
+        server_name:
+          type: string
+
+    FormConnector:
+      type: object
+      required:
+        - id
+        - name
+        - description
+        - base_url
+        - methods
+        - paths
+        - networks
+        - headers
+        - timeout
+        - max_bytes
+        - auth
+        - tls
+        - secrets
+        - groups
+        - updated_by
+        - created
+        - updated
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+          description: The name the forms give in their Connector key, letters, digits, ".", "_" and "-".
+        description:
+          type: string
+        base_url:
+          type: string
+          description: The absolute url the paths of the forms are relative to; https, unless the connector sends no credential.
+        methods:
+          type: array
+          items:
+            $ref: '#/components/schemas/FormConnectorMethod'
+        paths:
+          type: array
+          description: The path prefixes the forms may call, "/servers"; none, any path under the base url.
+          items:
+            type: string
+        networks:
+          type: array
+          description: The loopback, private or reserved networks the host may resolve to, as CIDR prefixes.
+          items:
+            type: string
+        headers:
+          type: object
+          description: Headers sent with each call, without credential.
+          additionalProperties:
+            type: string
+        timeout:
+          type: integer
+          description: Seconds, 1 to 300.
+        max_bytes:
+          type: integer
+          format: int64
+          description: The largest answer read, 1 KiB to 50 MiB.
+        auth:
+          $ref: '#/components/schemas/FormConnectorAuth'
+        tls:
+          $ref: '#/components/schemas/FormConnectorTLS'
+        secrets:
+          type: object
+          description: Whether each secret is set; their values are never returned.
+          required: [password, token, api_key, client_secret, client_key]
+          properties:
+            password:
+              type: boolean
+            token:
+              type: boolean
+            api_key:
+              type: boolean
+            client_secret:
+              type: boolean
+            client_key:
+              type: boolean
+        groups:
+          type: array
+          description: The groups the connector is published to.
+          items:
+            type: object
+            required: [id, role]
+            properties:
+              id:
+                type: integer
+                format: int64
+              role:
+                type: string
+        updated_by:
+          type: string
+        created:
+          type: string
+        updated:
+          type: string
+
+    FormConnectorInput:
+      type: object
+      required:
+        - name
+        - base_url
+        - auth
+      properties:
+        name:
+          type: string
+          description: The name the forms give in their Connector key, letters, digits, ".", "_" and "-".
+        description:
+          type: string
+        base_url:
+          type: string
+          description: The absolute url the paths of the forms are relative to; https, unless the connector sends no credential.
+        methods:
+          type: array
+          items:
+            $ref: '#/components/schemas/FormConnectorMethod'
+        paths:
+          type: array
+          description: The path prefixes the forms may call, "/servers"; none, any path under the base url.
+          items:
+            type: string
+        networks:
+          type: array
+          description: The loopback, private or reserved networks the host may resolve to, as CIDR prefixes.
+          items:
+            type: string
+        headers:
+          type: object
+          description: Headers sent with each call, without credential.
+          additionalProperties:
+            type: string
+        timeout:
+          type: integer
+          description: Seconds, 1 to 300.
+        max_bytes:
+          type: integer
+          format: int64
+          description: The largest answer read, 1 KiB to 50 MiB.
+        auth:
+          $ref: '#/components/schemas/FormConnectorAuth'
+        tls:
+          $ref: '#/components/schemas/FormConnectorTLS'
+        groups:
+          type: array
+          description: The ids of the groups the connector is published to.
+          items:
+            type: integer
+            format: int64
+        secrets:
+          type: object
+          description: The secrets to set; null removes one, absent keeps it.
+          properties:
+            password:
+              type: string
+              nullable: true
+            token:
+              type: string
+              nullable: true
+            api_key:
+              type: string
+              nullable: true
+            client_secret:
+              type: string
+              nullable: true
+            client_key:
+              type: string
+              nullable: true
+
+    FormConnectorTestInput:
+      type: object
+      required:
+        - path
+      properties:
+        method:
+          $ref: '#/components/schemas/FormConnectorMethod'
+        path:
+          type: string
+          description: Relative to the base url, "/servers".
+        query:
+          type: object
+          additionalProperties:
+            type: string
+
+    FormConnectorTestResult:
+      type: object
+      required:
+        - url
+        - duration_ms
+      properties:
+        url:
+          type: string
+          description: The url called, without the query parameter carrying an api key.
+        status:
+          type: integer
+        duration_ms:
+          type: integer
+        content_type:
+          type: string
+        body:
+          type: string
+          description: The start of the answer, 4 KiB at most.
+        error:
+          type: string
+          description: Why the call failed before an answer, a refused address say.
+
+    FormCandidatesInput:
+      type: object
+      properties:
+        data:
+          type: object
+          description: The values of the form, which the references of the path and arguments read.
+          additionalProperties: {}
+
+    ComplianceDesignerCommitInput:
+      type: object
+      required:
+        - message
+        - operations
+      properties:
+        message:
+          type: string
+          description: The message of the version recording the changes, its first line a summary.
+        baseline_message:
+          type: string
+          description: |
+            The message of the version recording the changes made elsewhere since the
+            last version, if any. "Changes made outside the designer" by default.
+        operations:
+          type: array
+          minItems: 1
+          maxItems: 5000
+          items:
+            $ref: '#/components/schemas/ComplianceDesignerOperation'
+
+    ComplianceDesignerOperation:
+      type: object
+      description: |
+        A change of the compliance designer. `ref` names the object it applies to, a
+        ruleset or a moduleset of kind `kind` (rulesets for the operations on
+        variables and on the ruleset type, publicity and filterset; modulesets for
+        those on modules). The other properties:
+
+        - create: `name`, `as`;
+        - rename: `name`;
+        - clone: `as`, `name` (the collector's "<name>_clone" when absent);
+        - delete;
+        - set_type: `ruleset_type`;
+        - set_public: `ruleset_public`;
+        - set_filterset: `filterset` (id or name), absent or empty to remove it;
+          a filterset makes the ruleset contextual;
+        - add_variable: `var_name`, `var_class`, `var_value`;
+        - update_variable: `variable`, and the `var_name`, `var_class`, `var_value`
+          changed;
+        - delete_variable: `variable`;
+        - copy_variable: `variable`, `dst` (a ruleset), `move`;
+        - include, detach: `child_kind`, `child`, the parent being `ref`;
+        - add_module: `name`;
+        - rename_module: `module`, `name`;
+        - set_autofix: `module`, `autofix`;
+        - delete_module: `module`;
+        - add_team, remove_team: `role`, `team` (a group id or role);
+        - move_team: `role`, `to_role`, `team`.
+      required:
+        - op
+        - kind
+      properties:
+        op:
+          type: string
+          enum: [create, rename, clone, delete, set_type, set_public, set_filterset,
+            add_variable, update_variable, delete_variable, copy_variable, include, detach,
+            add_module, rename_module, set_autofix, delete_module, add_team, remove_team, move_team]
+          x-enum-varnames: [CompDesignerOpCreate, CompDesignerOpRename, CompDesignerOpClone,
+            CompDesignerOpDelete, CompDesignerOpSetType, CompDesignerOpSetPublic,
+            CompDesignerOpSetFilterset, CompDesignerOpAddVariable, CompDesignerOpUpdateVariable,
+            CompDesignerOpDeleteVariable, CompDesignerOpCopyVariable, CompDesignerOpInclude,
+            CompDesignerOpDetach, CompDesignerOpAddModule, CompDesignerOpRenameModule,
+            CompDesignerOpSetAutofix, CompDesignerOpDeleteModule, CompDesignerOpAddTeam,
+            CompDesignerOpRemoveTeam, CompDesignerOpMoveTeam]
+        kind:
+          $ref: '#/components/schemas/ComplianceDesignerKind'
+        ref:
+          type: string
+          description: The object, by id, name, or the "tmp:" reference an earlier operation gave it.
+        as:
+          type: string
+          description: The "tmp:" reference the next operations name the object created by.
+        name:
+          type: string
+        ruleset_type:
+          type: string
+          enum: [explicit, contextual]
+          x-enum-varnames: [CompDesignerRulesetExplicit, CompDesignerRulesetContextual]
+        ruleset_public:
+          type: boolean
+        filterset:
+          type: string
+        variable:
+          type: string
+          description: The variable, by id or name.
+        var_name:
+          type: string
+        var_class:
+          type: string
+        var_value:
+          type: string
+        dst:
+          type: string
+          description: The ruleset a variable is copied or moved to.
+        move:
+          type: boolean
+        child_kind:
+          $ref: '#/components/schemas/ComplianceDesignerKind'
+        child:
+          type: string
+        module:
+          type: string
+          description: The module, by id or name.
+        autofix:
+          type: boolean
+        role:
+          $ref: '#/components/schemas/ComplianceDesignerTeamRole'
+        to_role:
+          $ref: '#/components/schemas/ComplianceDesignerTeamRole'
+        team:
+          type: string
+
+    ComplianceDesignerKind:
+      type: string
+      enum: [ruleset, moduleset]
+      x-enum-varnames: [CompDesignerRuleset, CompDesignerModuleset]
+
+    ComplianceDesignerTeamRole:
+      type: string
+      enum: [publication, responsible]
+      x-enum-varnames: [CompDesignerPublication, CompDesignerResponsible]
+
+    ComplianceDesignerCommitResult:
+      type: object
+      required:
+        - applied
+        - ids
+      properties:
+        applied:
+          type: integer
+          description: The number of operations applied.
+        ids:
+          type: object
+          description: The id of each object created, by its "tmp:" reference.
+          additionalProperties:
+            type: integer
+            format: int64
+        version:
+          type: object
+          description: The version recording the changes; changed is false when none was.
+          required:
+            - commit
+            - changed
+          properties:
+            commit:
+              type: string
+            changed:
+              type: boolean
+        version_error:
+          type: string
+          description: Why no version could be recorded, the changes being saved all the same.
+
+    ComplianceDesignerRefusal:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+        index:
+          type: integer
+          description: The index of the operation refused; absent when the body itself is.
+
     ComplianceVersion:
       type: object
       description: A version of the compliance export, a commit of its git repository.
@@ -21573,6 +25630,98 @@ components:
         restricted:
           type: boolean
 
+    SysreportPurgeFile:
+      type: object
+      required: [kind, path]
+      properties:
+        kind:
+          type: string
+          enum: [file, command]
+        path:
+          type: string
+          description: The absolute path of a file, the command line of a command, as the sysreport routes show them
+
+    SysreportPurgeInput:
+      type: object
+      required: [files]
+      properties:
+        files:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/SysreportPurgeFile'
+        all_nodes:
+          type: boolean
+          description: Purge the files from the sysreport of every node, not only this one
+
+    SysreportPurgeNode:
+      type: object
+      required: [node_id, paths, rewritten, dropped, removed, kept]
+      properties:
+        node_id:
+          type: string
+        paths:
+          type: array
+          description: The paths of the repository the files resolved to
+          items:
+            type: string
+        rewritten:
+          type: integer
+          description: Revisions recreated without the files
+        dropped:
+          type: integer
+          description: Revisions that held nothing else, gone
+        removed:
+          type: integer
+          description: Contents of the files destroyed
+        kept:
+          type: integer
+          description: Contents still stored because another file of the node holds the same
+        error:
+          type: string
+
+    SysreportPurge:
+      type: object
+      required: [id, state, node_ids, files, author, requested, nodes]
+      properties:
+        id:
+          type: string
+        state:
+          type: string
+          enum: [queued, running, done, failed]
+        node_ids:
+          type: array
+          description: The nodes to purge; empty for every node
+          items:
+            type: string
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/SysreportPurgeFile'
+        author:
+          type: string
+        requested:
+          type: string
+        started:
+          type: string
+        finished:
+          type: string
+        nodes:
+          type: array
+          description: The nodes the files were found on, as they are purged
+          items:
+            $ref: '#/components/schemas/SysreportPurgeNode'
+        error:
+          type: string
+
+    SysreportPurgeResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/SysreportPurge'
+
     SysreportTreeResponse:
       type: object
       required: [data]
@@ -21931,6 +26080,48 @@ components:
         meta:
           $ref: '#/components/schemas/ListMeta'
 
+    ResinfoListResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          oneOf:
+            - type: array
+              items:
+                $ref: '#/components/schemas/ResinfoRow'
+            - type: object
+              additionalProperties:
+                type: object
+                additionalProperties:
+                  type: integer
+        meta:
+          $ref: '#/components/schemas/ListMeta'
+
+    ResinfoRow:
+      type: object
+      description: |
+        A key/value pair a resource of a service declares on one of its nodes. Every
+        property is optional: the `props` query parameter selects which columns the
+        server returns.
+      properties:
+        id:
+          type: integer
+        svc_id:
+          type: string
+        node_id:
+          type: string
+        rid:
+          type: string
+        res_key:
+          type: string
+        res_value:
+          type: string
+        topology:
+          type: string
+        updated:
+          type: string
+
     AppRow:
       type: object
       description: |
@@ -22037,6 +26228,331 @@ components:
           type: array
           items:
             type: string
+
+    FormRevision:
+      type: object
+      description: |
+        A revision of a form definition, a commit of its git history.
+      required: [id, cid, start, stat, group]
+      properties:
+        id:
+          type: string
+          description: The commit id, as cid.
+        cid:
+          type: string
+        start:
+          type: string
+          description: When it was committed, "YYYY-MM-DDTHH:MM:SS".
+        content:
+          type: string
+          description: |
+            "Author: Name <email>", followed for a rollback by "<br>" and the
+            line of the commit message naming the revision restored.
+        stat:
+          type: array
+          items:
+            type: string
+          description: The files the revision changed.
+        summary:
+          type: string
+          description: The stat summary line, "1 file changed, ...".
+        group:
+          type: string
+          description: The form id.
+
+    FormRevisionListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/FormRevision'
+
+    FormRevisionResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [oid, content]
+          properties:
+            oid:
+              type: string
+              description: The git object id of the definition, empty when none.
+            content:
+              type: string
+              description: The form definition at the revision, in YAML.
+
+    FormDiffResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: string
+          description: The diff, as git prints it.
+
+    QuotaRow:
+      type: object
+      description: |
+        A quota of an application code in a disk group of a storage array, a
+        row of v_disk_quota. Sizes are in MB; dg_reservable is dg_size less
+        dg_reserved, the sum of the quotas of the disk group; quota_used the
+        space the disks of the application use there. Every property is
+        optional: the props query parameter selects them.
+      properties:
+        id:
+          type: integer
+        array_id:
+          type: integer
+        array_name:
+          type: string
+        array_model:
+          type: string
+        dg_id:
+          type: integer
+        dg_name:
+          type: string
+        dg_size:
+          type: integer
+        dg_used:
+          type: integer
+        dg_free:
+          type: integer
+        dg_reserved:
+          type: integer
+        dg_reservable:
+          type: integer
+        app_id:
+          type: integer
+        app:
+          type: string
+        quota:
+          type: integer
+        quota_used:
+          type: integer
+
+    QuotaListResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          oneOf:
+            - type: array
+              items:
+                $ref: '#/components/schemas/QuotaRow'
+            - type: object
+              additionalProperties:
+                type: object
+                additionalProperties:
+                  type: integer
+        meta:
+          $ref: '#/components/schemas/ListMeta'
+
+    QuotaInput:
+      type: object
+      description: |
+        A quota to set: its size in MB, and the application code it is for, by
+        app_id or app. Creating one requires both; changing one, either.
+      properties:
+        quota:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 2147483647
+        app_id:
+          type: integer
+          format: int64
+        app:
+          type: string
+
+    QuotaChangeResponse:
+      type: object
+      required: [info, id]
+      properties:
+        info:
+          type: string
+        id:
+          type: integer
+          format: int64
+          description: The quota written or deleted.
+
+    ArrayRow:
+      type: object
+      description: |
+        A storage array. Every property is optional: the props query parameter
+        selects them. array_cache is in MB.
+      properties:
+        id:
+          type: integer
+        array_name:
+          type: string
+        array_model:
+          type: string
+        array_comment:
+          type: string
+        array_firmware:
+          type: string
+        array_cache:
+          type: integer
+        array_level:
+          type: integer
+        array_updated:
+          type: string
+
+    ArrayListResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          oneOf:
+            - type: array
+              items:
+                $ref: '#/components/schemas/ArrayRow'
+            - type: object
+              additionalProperties:
+                type: object
+                additionalProperties:
+                  type: integer
+        meta:
+          $ref: '#/components/schemas/ListMeta'
+
+    DiskGroupRow:
+      type: object
+      description: |
+        A disk group of a storage array, its sizes in MB: dg_reserved is the sum
+        of its quotas. Every property is optional: the props query parameter
+        selects them.
+      properties:
+        id:
+          type: integer
+        array_id:
+          type: string
+          description: The id of the array, as text.
+        dg_name:
+          type: string
+        dg_size:
+          type: integer
+        dg_used:
+          type: integer
+        dg_free:
+          type: integer
+        dg_reserved:
+          type: integer
+        dg_updated:
+          type: string
+
+    DiskGroupListResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          oneOf:
+            - type: array
+              items:
+                $ref: '#/components/schemas/DiskGroupRow'
+            - type: object
+              additionalProperties:
+                type: object
+                additionalProperties:
+                  type: integer
+        meta:
+          $ref: '#/components/schemas/ListMeta'
+
+    SaveRow:
+      type: object
+      description: |
+        A backup a backup server indexes: what was saved (save_name, a path or a
+        database), from which node and service, by which server, in which group,
+        at which level, on which volume, when, and until when it is kept.
+        save_size is in bytes. Every property is optional: the props query
+        parameter selects them.
+      properties:
+        id:
+          type: integer
+        save_server:
+          type: string
+        save_id:
+          type: string
+        save_app:
+          type: string
+        node_id:
+          type: string
+        nodename:
+          type: string
+        svc_id:
+          type: string
+        svcname:
+          type: string
+        save_name:
+          type: string
+        save_group:
+          type: string
+        save_level:
+          type: string
+        save_size:
+          type: integer
+          format: int64
+        save_volume:
+          type: string
+        save_date:
+          type: string
+        save_retention:
+          type: string
+
+    SaveListResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          oneOf:
+            - type: array
+              items:
+                $ref: '#/components/schemas/SaveRow'
+            - type: object
+              additionalProperties:
+                type: object
+                additionalProperties:
+                  type: integer
+        meta:
+          $ref: '#/components/schemas/ListMeta'
+
+    SavesSummaryResponse:
+      type: object
+      required: [data, total_size, total_count]
+      properties:
+        total_size:
+          type: integer
+          format: int64
+          description: The size of all the backups summed, in bytes.
+        total_count:
+          type: integer
+          format: int64
+        data:
+          type: array
+          items:
+            type: object
+            required: [key, label, size, count]
+            properties:
+              key:
+                type: string
+                description: |
+                  The app, server or group; for an object, the column and the id
+                  it is summed by, "svc_id:<id>" or "node_id:<id>".
+              label:
+                type: string
+                description: The key as it reads; the service or node name of an object.
+              size:
+                type: integer
+                format: int64
+                description: In bytes.
+              count:
+                type: integer
+                format: int64
 
     InfoResponse:
       type: object
@@ -22322,6 +26838,143 @@ components:
         meta:
           $ref: '#/components/schemas/ListMeta'
 
+    ActionEnqueueListResult:
+      type: object
+      description: The answer to a list of entries of PUT /actions.
+      required: [info, error, data, refusals]
+      properties:
+        info:
+          type: array
+          items:
+            type: string
+        error:
+          type: array
+          description: One message per refused entry, naming its target
+          items:
+            type: string
+        data:
+          type: array
+          description: The queued actions, as GET /actions/{id} returns them
+          items:
+            type: object
+        refusals:
+          type: array
+          items:
+            type: object
+            required: [index, message]
+            properties:
+              index:
+                type: integer
+                description: Index of the refused entry in the list sent, from 0
+              message:
+                type: string
+
+    AlertsDeleteInput:
+      type: object
+      required: [ids]
+      properties:
+        ids:
+          type: array
+          maxItems: 10000
+          items:
+            type: integer
+
+    AlertsDeleteResult:
+      type: object
+      required: [deleted, not_found]
+      properties:
+        deleted:
+          type: integer
+        not_found:
+          type: array
+          items:
+            type: integer
+
+    BatchOutcome:
+      type: object
+      description: What became of one object of a batch, as its single route would answer
+      required: [id, status, info]
+      properties:
+        id:
+          type: string
+        status:
+          type: integer
+          description: The http status the single route would answer with
+        info:
+          type: string
+
+    BatchResult:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/BatchOutcome'
+
+    IdsInput:
+      type: object
+      required: [ids]
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: string
+
+    InstancesInput:
+      type: object
+      required: [instances]
+      properties:
+        instances:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            required: [svc_id, node_id]
+            properties:
+              svc_id:
+                type: string
+              node_id:
+                type: string
+
+    ActionsAckInput:
+      type: object
+      required: [ids]
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: integer
+            format: int64
+        acked_comment:
+          type: string
+
+    ChecksBatchInput:
+      type: object
+      required: [action, ids]
+      properties:
+        action:
+          type: string
+          enum: [set_thresholds, reset_thresholds, delete]
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: integer
+            format: int64
+        chk_low:
+          type: integer
+          format: int64
+        chk_high:
+          type: integer
+          format: int64
+
     ListResponse:
       type: object
       required:
@@ -22369,7 +27022,485 @@ components:
             The API documentation (Swagger UI) is served, at the root of the API
             path (`<ui.enable>` of the component's configuration).
 
+    OrchestrationTargetKind:
+      type: string
+      description: |
+        What the action of a step acts on: a service as a whole, the instance of a
+        service on a node, a node, or a cluster.
+      enum: [service, instance, node, cluster]
+
+    OrchestrationTargets:
+      type: object
+      description: |
+        How a step names its targets. pick: the ids, svc_id for a service,
+        "svc_id@node_id" for an instance, node_id for a node, cluster_id for a
+        cluster. filterset: the services, the nodes, the instances of the services
+        on the nodes, or the clusters of the nodes, the filterset matches when the
+        run starts. same_as: the targets of an earlier step, of the same kind.
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [pick, filterset, same_as]
+        ids:
+          type: array
+          items:
+            type: string
+        filterset_id:
+          type: integer
+        step:
+          type: integer
+          description: For same_as, the index of the earlier step, from 0
+
+    OrchestrationStep:
+      type: object
+      description: |
+        One action on a set of targets. The action must be one the action queue
+        accepts for the kind of target (see PUT /actions); rid, the resources of
+        an instance, applies to instances only. pace says how many targets run at
+        a time: all, one (one after the other) or batch (batch_size at a time).
+        timeout, in seconds, fails a target whose action has not finished by
+        then; 0 means no limit.
+      required: [name, action, kind, targets, pace]
+      properties:
+        name:
+          type: string
+        action:
+          type: string
+        kind:
+          $ref: '#/components/schemas/OrchestrationTargetKind'
+        targets:
+          $ref: '#/components/schemas/OrchestrationTargets'
+        rid:
+          type: string
+        pace:
+          type: string
+          enum: [all, one, batch]
+        batch_size:
+          type: integer
+          minimum: 1
+        timeout:
+          type: integer
+          minimum: 0
+
+    OrchestrationInput:
+      type: object
+      required: [name, steps]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrchestrationStep'
+
+    Orchestration:
+      type: object
+      required: [id, name, description, steps, created, updated, updated_by]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrchestrationStep'
+        created:
+          type: string
+        updated:
+          type: string
+        updated_by:
+          type: string
+          description: Email of the author of the last change
+
+    OrchestrationRow:
+      type: object
+      description: |
+        An orchestration, as listed. Every property is optional: the `props` query
+        parameter selects which columns the server returns.
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        steps:
+          type: string
+          description: The steps, as JSON (an array of OrchestrationStep).
+        step_count:
+          type: integer
+        created:
+          type: string
+        updated:
+          type: string
+        updated_by:
+          type: string
+        run_count:
+          type: integer
+        last_run_id:
+          type: integer
+          nullable: true
+        last_run_status:
+          type: string
+          nullable: true
+          description: The status of its last run, null when never run.
+        last_run_started:
+          type: string
+          nullable: true
+
+    OrchestrationListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          oneOf:
+            - type: array
+              items:
+                $ref: '#/components/schemas/OrchestrationRow'
+            - type: object
+              additionalProperties:
+                type: object
+                additionalProperties:
+                  type: integer
+        meta:
+          $ref: '#/components/schemas/ListMeta'
+
+    OrchestrationCheckTarget:
+      type: object
+      required: [label, ok, message]
+      properties:
+        node_id:
+          type: string
+        svc_id:
+          type: string
+        cluster_id:
+          type: string
+        label:
+          type: string
+          description: The name of the target, as the run shows it
+        ok:
+          type: boolean
+        message:
+          type: string
+          description: Why the action queue would refuse the target, empty when ok
+
+    OrchestrationCheckStep:
+      type: object
+      required: [step, targets, message]
+      properties:
+        step:
+          type: integer
+        targets:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrchestrationCheckTarget'
+        message:
+          type: string
+          description: What makes the step itself invalid, empty when it is valid
+
+    OrchestrationCheckResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrchestrationCheckStep'
+
+    OrchestrationRunStatus:
+      type: string
+      description: |
+        cancelled: the run was stopped for good, while running or after it failed
+        or was stopped: it neither resumes nor goes on (see POST
+        /orchestration_runs/{run_id}/cancel).
+      enum: [running, succeeded, failed, stopped, cancelled]
+
+    OrchestrationRunStepStatus:
+      type: string
+      description: |
+        stopped: the run was stopped during the step; not_run: the run failed or
+        was stopped before it; acknowledged: the step failed or was stopped, and
+        its outcome was accepted for the run to go on (see POST /orchestration_runs/{run_id}/continue).
+      enum: [waiting, running, succeeded, failed, acknowledged, stopped, not_run]
+
+    OrchestrationRunTargetStatus:
+      type: string
+      description: |
+        waiting: not started; queued: its action waits in the queue; running: an
+        agent runs it; ok: it returned 0; failed: it returned non-zero; refused:
+        the queue refused it; timed_out: it outlived the time limit of the step;
+        cancelled: its action was cancelled or deleted; not_run: the run stopped
+        before it.
+      enum: [waiting, queued, running, ok, failed, refused, timed_out, cancelled, not_run]
+
+    OrchestrationRunTarget:
+      type: object
+      required: [id, step, position, node_id, svc_id, cluster_id, label, status, message]
+      properties:
+        id:
+          type: integer
+        step:
+          type: integer
+        position:
+          type: integer
+        node_id:
+          type: string
+        svc_id:
+          type: string
+        cluster_id:
+          type: string
+        label:
+          type: string
+        status:
+          $ref: '#/components/schemas/OrchestrationRunTargetStatus'
+        action_id:
+          type: integer
+          nullable: true
+        ret:
+          type: integer
+          nullable: true
+        stdout:
+          type: string
+        stderr:
+          type: string
+        command:
+          type: string
+        message:
+          type: string
+          description: Why it did not succeed, when the action queue or the run says so
+        queued:
+          type: string
+          nullable: true
+        started:
+          type: string
+          nullable: true
+        ended:
+          type: string
+          nullable: true
+
+    OrchestrationRunStep:
+      type: object
+      required: [step, status, counts]
+      properties:
+        step:
+          type: integer
+        status:
+          $ref: '#/components/schemas/OrchestrationRunStepStatus'
+        started:
+          type: string
+          nullable: true
+        ended:
+          type: string
+          nullable: true
+        acked_by:
+          type: string
+          description: Who acknowledged the failure of the step, empty when none did
+        acked_at:
+          type: string
+          nullable: true
+        ack_comment:
+          type: string
+          description: Why the failure was acknowledged
+        counts:
+          type: object
+          description: The number of targets by status
+          additionalProperties:
+            type: integer
+        targets:
+          type: array
+          description: Absent from the list of runs
+          items:
+            $ref: '#/components/schemas/OrchestrationRunTarget'
+
+    OrchestrationRun:
+      type: object
+      required: [id, name, plan, status, current_step, started, started_by, message, steps]
+      properties:
+        id:
+          type: integer
+        orchestration_id:
+          type: integer
+          nullable: true
+          description: Null once the orchestration is deleted
+        name:
+          type: string
+        plan:
+          type: array
+          description: The steps of the orchestration when the run started
+          items:
+            $ref: '#/components/schemas/OrchestrationStep'
+        status:
+          $ref: '#/components/schemas/OrchestrationRunStatus'
+        current_step:
+          type: integer
+        started:
+          type: string
+        ended:
+          type: string
+          nullable: true
+        started_by:
+          type: string
+        message:
+          type: string
+          description: Why the run failed or was stopped
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrchestrationRunStep'
+
+    WikiRevision:
+      type: object
+      required: [id, saved_on, author, change_note]
+      properties:
+        id:
+          type: integer
+          format: int64
+        saved_on:
+          type: string
+          format: date-time
+        author:
+          type: string
+          description: The email of the user who saved it, empty when unknown
+        change_note:
+          type: string
+          description: What the revision changed, in a few words; may be empty
+        body:
+          type: string
+          description: The notes, in Markdown; absent from a list of revisions
+
+    WikiPage:
+      type: object
+      required: [revision, revisions, total, writable]
+      properties:
+        revision:
+          description: The latest revision, with its body; null when none was saved
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/WikiRevision'
+        revisions:
+          type: array
+          description: The revisions, the latest first, without their body
+          items:
+            $ref: '#/components/schemas/WikiRevision'
+        total:
+          type: integer
+          description: How many revisions the page has in all
+        writable:
+          type: boolean
+          description: Whether the caller may save a revision
+
+    WikiRevisionInput:
+      type: object
+      required: [body, base_id]
+      properties:
+        body:
+          type: string
+          description: The notes, in Markdown, at most 60000 bytes
+        change_note:
+          type: string
+          description: What the revision changes, at most 200 characters
+        base_id:
+          type: integer
+          format: int64
+          description: The revision edited, 0 when the page has none
+
+    OrchestrationRunContinueInput:
+      type: object
+      required: [comment]
+      properties:
+        comment:
+          type: string
+          description: Why the failure of the step is accepted
+
+    OrchestrationRunRow:
+      type: object
+      description: |
+        A run, as listed. Every property is optional: the `props` query parameter
+        selects which columns the server returns.
+      properties:
+        id:
+          type: integer
+        orchestration_id:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        status:
+          type: string
+          description: running, succeeded, failed or stopped.
+        current_step:
+          type: integer
+        message:
+          type: string
+        started:
+          type: string
+        ended:
+          type: string
+          nullable: true
+        started_by:
+          type: string
+        step_count:
+          type: integer
+        steps_done:
+          type: integer
+          description: Its steps succeeded, or failed and acknowledged.
+        duration:
+          type: integer
+          description: Seconds from its start to its end, or to now while it runs.
+
+    OrchestrationRunListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          oneOf:
+            - type: array
+              items:
+                $ref: '#/components/schemas/OrchestrationRunRow'
+            - type: object
+              additionalProperties:
+                type: object
+                additionalProperties:
+                  type: integer
+        meta:
+          $ref: '#/components/schemas/ListMeta'
+
   parameters:
+    inPathComplianceAgentName:
+      in: path
+      name: name
+      required: true
+      description: The name of the moduleset or ruleset.
+      schema:
+        type: string
+    inQueryComplianceAgentPath:
+      in: query
+      name: path
+      description: The object of the node, as namespace/kind/name. Default the node.
+      schema:
+        type: string
+    inPathOrchestrationId:
+      in: path
+      name: orchestration_id
+      required: true
+      description: ID of the orchestration
+      schema:
+        type: integer
+
+    inPathOrchestrationRunId:
+      in: path
+      name: run_id
+      required: true
+      description: ID of the orchestration run
+      schema:
+        type: integer
+
     ObjectPathHeader:
       name: OC3-ObjectPath
       in: header

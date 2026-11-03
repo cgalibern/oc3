@@ -447,27 +447,25 @@ func (oDb *DB) UpdateDashActionErrors(ctx context.Context, svcID string, nodeID 
 		if svcEnv.Valid && svcEnv.String == "PRD" {
 			sev = 4
 		}
-		const queryInsert = `INSERT INTO dashboard
-                 SET
-                   dash_type="action errors",
-                   svc_id = ?,
-                   node_id = ?,
-                   dash_severity = ?,
-                   dash_fmt = "%(err)s action errors",
-                   dash_dict = ?,
-                   dash_created = NOW(),
-                   dash_updated = NOW(),
-                   dash_env = ?
-                 ON DUPLICATE KEY UPDATE
-                   dash_severity = ?,
-                   dash_fmt = "%(err)s action errors",
-                   dash_dict = ?,
-                   dash_updated = NOW(),
-                   dash_env = ?`
+		const sourceAlert = `SELECT
+                   "action errors" AS dash_type,
+                   ? AS svc_id,
+                   ? AS node_id,
+                   ? AS dash_severity,
+                   "%(err)s action errors" AS dash_fmt,
+                   ? AS dash_dict,
+                   NOW() AS dash_created,
+                   NOW() AS dash_updated,
+                   ? AS dash_env`
 
 		dashDict := fmt.Sprintf(`{"err": "%d"}`, errCount)
 
-		if _, err := oDb.ExecContext(ctx, queryInsert, svcID, nodeID, sev, dashDict, svcEnv, sev, dashDict, svcEnv); err != nil {
+		if _, err := oDb.upsertAlerts(ctx, alertsUpsert{
+			source:  sourceAlert,
+			args:    []any{svcID, nodeID, sev, dashDict, svcEnv},
+			columns: []string{"dash_type", "svc_id", "node_id", "dash_severity", "dash_fmt", "dash_dict", "dash_created", "dash_updated", "dash_env"},
+			update:  []string{"dash_severity = s.dash_severity", "dash_fmt = s.dash_fmt", "dash_dict = s.dash_dict", "dash_updated = s.dash_updated", "dash_env = s.dash_env"},
+		}); err != nil {
 			return fmt.Errorf("UpdateDashActionErrors: insert/update failed: %w", err)
 		}
 		// TODO: WebSocket notification
@@ -500,6 +498,9 @@ func (oDb *DB) queryServiceActions(ctx context.Context, svcID, id string, p List
 		Via(schema.TServices).
 		LeftJoin(schema.TNodes).
 		RawSelect(p.SelectExprs...)
+	if actionsFirst(p) {
+		q = q.StraightJoin()
+	}
 	if svcID != "" {
 		q = q.Where(schema.SvcactionsSvcID, "=", svcID)
 	}
@@ -541,6 +542,31 @@ func (oDb *DB) queryServiceActions(ctx context.Context, svcID, id string, p List
 	}
 	defer func() { _ = rows.Close() }()
 	return scanRowsToMaps(rows, p.Props, p.TypeHints)
+}
+
+// actionsFirst tells whether the actions are best read first, in their sort
+// order, the services they join after: the sort and the filters are on their
+// own columns, so that a page stops after its rows, by the date index for the
+// default sort. The optimizer, blind to the LIMIT, would rather read the
+// services first, then join and sort all their actions. A filter or a sort on
+// a joined column (services.svcname...) leaves it the choice: reading the
+// actions first would then go through all of them to fill a page. So does a
+// count, in no order: the visible services first reach their actions by index.
+func actionsFirst(p ListParams) bool {
+	if p.CountOnly {
+		return false
+	}
+	for _, f := range p.Filters {
+		if f.Col == nil || f.Col.T != schema.TSvcactions {
+			return false
+		}
+	}
+	for _, o := range p.OrderBy {
+		if !strings.HasPrefix(o, schema.TSvcactions.Name+".") {
+			return false
+		}
+	}
+	return true
 }
 
 // GetServiceActions returns the actions the agents ran on a service.

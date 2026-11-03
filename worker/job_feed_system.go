@@ -101,20 +101,33 @@ func (d *jobFeedSystem) pkg(ctx context.Context) error {
 		Data: pkgList,
 	}
 
-	if count, err := request.ExecContextAndCountRowsAffected(ctx, d.db); err != nil {
+	// changed tells whether the packages of the node, as the diffs compare them,
+	// changed: a package inserted, or one removed below. The timestamps alone,
+	// renewed on each package already known, do not change a diff.
+	changed := false
+	if updated, inserted, err := request.Exec(ctx, d.db); err != nil {
 		return err
-	} else if count > 0 {
+	} else if updated+inserted > 0 {
 		d.oDb.Session.SetChanges(request.Table)
+		changed = inserted > 0
 	}
 
 	if count, err := d.oDb.ExecContextAndCountRowsAffected(ctx, "DELETE FROM packages WHERE node_id = ? AND pkg_updated < ?", nodeID, now); err != nil {
 		return err
 	} else if count > 0 {
 		d.oDb.Session.SetChanges(tableName)
+		changed = true
 	}
 
 	if err := d.oDb.DashboardUpdatePkgDiffForNode(ctx, nodeID); err != nil {
 		return err
+	}
+	// The packages diffs comparing this node are stale: a new generation, the
+	// writes above being committed (no job transaction).
+	if changed && d.redis != nil {
+		if err := d.redis.Incr(ctx, cachekeys.PkgDiffGenPrefix+nodeID).Err(); err != nil {
+			slog.Warn("cannot renew the packages diff generation", logkey.NodeID, nodeID, logkey.Error, err)
+		}
 	}
 	return nil
 }
@@ -258,7 +271,9 @@ func (d *jobFeedSystem) lan(ctx context.Context) error {
 			mariadb.Mapping{To: "mask"},
 			mariadb.Mapping{To: "flag_deprecated"},
 		},
-		Keys: []string{"node_id"},
+		// The unique key uk_node_intf_addr (migration 0025): without it, no
+		// address was found again, each feed inserted them all anew.
+		Keys: []string{"node_id", "intf", "addr"},
 		Data: l,
 	}
 
@@ -307,7 +322,7 @@ func (d *jobFeedSystem) groups(ctx context.Context) error {
 			mariadb.Mapping{To: "group_id", From: "gid"},
 			mariadb.Mapping{To: "group_name", From: "groupname"},
 		},
-		Keys: []string{"node_id", "group_id"},
+		Keys: []string{"node_id", "group_name", "group_id"},
 		Data: data,
 	}
 
@@ -355,7 +370,7 @@ func (d *jobFeedSystem) users(ctx context.Context) error {
 			mariadb.Mapping{To: "user_id", From: "uid"},
 			mariadb.Mapping{To: "user_name", From: "username"},
 		},
-		Keys: []string{"node_id", "user_id"},
+		Keys: []string{"node_id", "user_name", "user_id"},
 		Data: data,
 	}
 

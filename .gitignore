@@ -11,8 +11,13 @@
 !LICENSE
 !.gitignore
 !Makefile
-!migration.sql
+!migrate/sql/*.sql
+!tools/seed-testdata/*
+!tools/bench-collector/*
 .idea
 core/version/version.go
 .trash
 .claude
+!tools/agent-sim/*
+tools/agent-sim/capture/
+tools/agent-sim/results/

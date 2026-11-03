@@ -24,7 +24,7 @@ type (
 	// DBInstanceResource is the database table resmon
 	//
 	// CREATE TABLE `resmon` (
-	//        `id` int(11) NOT NULL AUTO_INCREMENT,
+	//        `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
 	//        `rid` varchar(255) DEFAULT NULL,
 	//        `res_status` enum('up','down','warn','n/a','undef','stdby up','stdby down') DEFAULT 'undef',
 	//        `changed` timestamp NOT NULL DEFAULT current_timestamp(),
@@ -94,7 +94,7 @@ type (
 	     UNIQUE KEY `uk` (`node_id`,`svc_id`,`rid`)
 	   ) ENGINE=InnoDB AUTO_INCREMENT=40132 DEFAULT CHARSET=utf8
 
-	   idx1 (node_id, svc_id), a prefix of uk, dropped in migration.sql (2026-10-14).
+	   idx1 (node_id, svc_id), a prefix of uk, dropped by migration 0012_resmon_log_last_drop_idx1.
 	*/
 	DBResmonLog struct {
 		SvcID  string
@@ -178,7 +178,7 @@ func (oDb *DB) ResmonRefreshTimestamp(ctx context.Context, nodeID string, object
 		return
 	}
 
-	slog.Info(fmt.Sprintf("ResmonRefreshTimestamp %s", time.Since(begin)))
+	slog.Debug(fmt.Sprintf("ResmonRefreshTimestamp %s", time.Since(begin)))
 	return
 }
 
@@ -213,11 +213,7 @@ func (oDb *DB) ResourceOutdatedLists(ctx context.Context, maxAge time.Duration) 
 func (oDb *DB) ResourceUpdateLog(ctx context.Context, resource ResourceMeta, avail string) error {
 	defer logDuration("ResourceUpdateLog "+resource.String(), time.Now())
 	const (
-		qGetLogLast = "SELECT `res_status`, `res_begin` FROM `resmon_log_last` WHERE `svc_id` = ? AND `node_id` = ? AND `rid` = ?"
-		qSetLogLast = "" +
-			"INSERT INTO `resmon_log_last` (`svc_id`, `node_id`, `rid`, `res_begin`, `res_end`, `res_status`)" +
-			" VALUES (?, ?, ?, NOW(), NOW(), ?)" +
-			" ON DUPLICATE KEY UPDATE `res_begin` = NOW(), `res_end` = NOW(), `res_status` = ?"
+		qGetLogLast                                  = "SELECT `res_status`, `res_begin` FROM `resmon_log_last` WHERE `svc_id` = ? AND `node_id` = ? AND `rid` = ?"
 		qExtendIntervalOfCurrentAvail                = "UPDATE `resmon_log_last` SET `res_end` = NOW() WHERE `svc_id` = ? AND `node_id` = ? AND `rid` = ?"
 		qSaveIntervalOfPreviousAvailBeforeTransition = "" +
 			"INSERT INTO `resmon_log` (`svc_id`, `node_id`, `rid`, `res_begin`, `res_end`, `res_status`)" +
@@ -229,7 +225,14 @@ func (oDb *DB) ResourceUpdateLog(ctx context.Context, resource ResourceMeta, ava
 		previousBegin time.Time
 	)
 	setLogLast := func() error {
-		_, err := oDb.ExecContext(ctx, qSetLogLast, resource.OID, resource.NID, resource.RID, avail, avail)
+		_, _, err := oDb.upsertRows(ctx, rowsUpsert{
+			table:   "resmon_log_last",
+			source:  "SELECT ? AS svc_id, ? AS node_id, ? AS rid, NOW() AS res_begin, NOW() AS res_end, ? AS res_status",
+			args:    []any{resource.OID, resource.NID, resource.RID, avail},
+			columns: []string{"svc_id", "node_id", "rid", "res_begin", "res_end", "res_status"},
+			match:   "t.node_id = s.node_id AND t.svc_id = s.svc_id AND t.rid = s.rid",
+			update:  []string{"res_begin = s.res_begin", "res_end = s.res_end", "res_status = s.res_status"},
+		})
 		if err != nil {
 			return fmt.Errorf("objectUpdateLog can't update resmon_log_last %s: %w", resource, err)
 		}
@@ -340,6 +343,37 @@ func (oDb *DB) PurgeResmonOutdated(ctx context.Context, maxAge time.Duration) er
 // ResmonLogLastFromObjectIDs returns the current status logs of the resources
 // of the objects on the nodes. Both lists bound the read to the uk index range
 // (node_id, svc_id): with the objects alone, the whole table would be scanned.
+// ResmonInstancesFromObjectIDs returns the instances of objectIDs on nodeIDs
+// that have resources in resmon, each as "svc_id@node_id".
+func (oDb *DB) ResmonInstancesFromObjectIDs(ctx context.Context, nodeIDs []string, objectIDs ...string) ([]string, error) {
+	if len(objectIDs) == 0 || len(nodeIDs) == 0 {
+		return nil, nil
+	}
+	query := fmt.Sprintf("SELECT DISTINCT `svc_id`, `node_id` FROM `resmon` WHERE `node_id` IN (%s) AND `svc_id` IN (%s)",
+		Placeholders(len(nodeIDs)), Placeholders(len(objectIDs)))
+	args := make([]any, 0, len(nodeIDs)+len(objectIDs))
+	for _, v := range nodeIDs {
+		args = append(args, v)
+	}
+	for _, v := range objectIDs {
+		args = append(args, v)
+	}
+	rows, err := oDb.DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("resmonInstancesFromObjectIDs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var l []string
+	for rows.Next() {
+		var svcID, nodeID string
+		if err := rows.Scan(&svcID, &nodeID); err != nil {
+			return nil, fmt.Errorf("resmonInstancesFromObjectIDs: %w", err)
+		}
+		l = append(l, svcID+"@"+nodeID)
+	}
+	return l, rows.Err()
+}
+
 func (oDb *DB) ResmonLogLastFromObjectIDs(ctx context.Context, nodeIDs []string, objectIDs ...string) ([]*DBResmonLog, error) {
 	if len(objectIDs) == 0 || len(nodeIDs) == 0 {
 		return nil, nil
@@ -386,23 +420,23 @@ func (oDb *DB) ResmonLogLastFromObjectIDs(ctx context.Context, nodeIDs []string,
 
 func (oDb *DB) ResmonLogLastUpdate(ctx context.Context, l ...*DBResmonLog) error {
 	defer logDuration("ResmonLogLastUpdate", time.Now())
-	const (
-		insertColList         = "(`svc_id`, `node_id`, `rid`, `res_begin`, `res_end`, `res_status`, `res_log`)"
-		valueList             = "(?, ?, ?, NOW(), NOW(), ?, ?)"
-		onDuplicateAssignment = "`res_begin`=VALUES(`res_begin`), `res_end`=VALUES(`res_end`), `res_status`=VALUES(`res_status`), `res_log`=VALUES(`res_log`)"
-	)
 	if len(l) == 0 {
 		return nil
 	}
-	placeholders := strings.Repeat(valueList+", ", len(l)-1) + valueList
-
-	query := fmt.Sprintf("INSERT INTO `resmon_log_last` %s VALUES %s ON DUPLICATE KEY UPDATE %s", insertColList, placeholders, onDuplicateAssignment)
-	args := make([]any, 0, 5*len(l))
-	for _, v := range l {
-		args = append(args, v.SvcID, v.NodeID, v.RID, v.Status, v.Log)
+	rows := make([][]any, len(l))
+	for i, v := range l {
+		rows[i] = []any{v.SvcID, v.NodeID, v.RID, v.Status, v.Log}
 	}
-
-	_, err := oDb.ExecContext(ctx, query, args...)
+	given, args := givenRows([]string{"svc_id", "node_id", "rid", "res_status", "res_log"}, rows)
+	_, _, err := oDb.upsertRows(ctx, rowsUpsert{
+		table:   "resmon_log_last",
+		source:  "SELECT r.*, NOW() AS res_begin, NOW() AS res_end FROM (" + given + ") r",
+		args:    args,
+		columns: []string{"svc_id", "node_id", "rid", "res_status", "res_log", "res_begin", "res_end"},
+		// The unique key uk.
+		match:  "t.node_id = s.node_id AND t.svc_id = s.svc_id AND t.rid = s.rid",
+		update: []string{"res_begin = s.res_begin", "res_end = s.res_end", "res_status = s.res_status", "res_log = s.res_log"},
+	})
 	return err
 }
 
@@ -454,28 +488,34 @@ func (oDb *DB) ResmonLogUpdate(ctx context.Context, l ...*DBResmonLog) error {
 
 func (oDb *DB) ResmonUpdate(ctx context.Context, l ...*DBInstanceResource) error {
 	defer logDuration("ResmonUpdate", time.Now())
-	const (
-		insertColList         = "(`svc_id`,`node_id`,`vmname`,`rid`,`res_status`,`res_type`,`res_log`,`res_desc`,`res_optional`,`res_disable`,`res_monitor`, `changed`, `updated`)"
-		valueList             = "(?,?,?,?,?,?,?,?,?,?,?,?,NOW())"
-		onDuplicateAssignment = "" +
-			"`res_status`=VALUES(`res_status`)," +
-			"`res_type`=VALUES(`res_type`), `res_log`=VALUES(`res_log`), `res_desc`=VALUES(`res_desc`), `res_optional`=VALUES(`res_optional`)," +
-			"`res_disable`=VALUES(`res_disable`), `res_monitor`=VALUES(`res_monitor`),`changed`=VALUES(`changed`),`updated`=VALUES(`updated`)"
-	)
 	if len(l) == 0 {
 		return nil
 	}
-	placeholders := strings.Repeat(valueList+", ", len(l)-1) + valueList
-
-	query := fmt.Sprintf("INSERT INTO `resmon` %s VALUES %s ON DUPLICATE KEY UPDATE %s", insertColList, placeholders, onDuplicateAssignment)
-	args := make([]any, 0, 12*len(l))
-	for _, v := range l {
-		args = append(args, v.SvcID, v.NodeID, v.VmName, v.RID, v.Status, v.ResType, v.Log, v.Desc, v.Optional, v.Disable, v.Monitor, v.Changed)
+	columns := []string{"svc_id", "node_id", "vmname", "rid",
+		"res_status", "res_type", "res_log", "res_desc", "res_optional", "res_disable", "res_monitor", "changed"}
+	rows := make([][]any, len(l))
+	for i, v := range l {
+		rows[i] = []any{v.SvcID, v.NodeID, v.VmName, v.RID,
+			v.Status, v.ResType, v.Log, v.Desc, v.Optional, v.Disable, v.Monitor, v.Changed}
 	}
-
-	if count, err := oDb.execCountContext(ctx, query, args...); err != nil {
+	given, args := givenRows(columns, rows)
+	update := make([]string, 0, len(columns))
+	for _, c := range columns[4:] {
+		update = append(update, c+" = s."+c)
+	}
+	changed, inserted, err := oDb.upsertRows(ctx, rowsUpsert{
+		table:   "resmon",
+		source:  "SELECT r.*, NOW() AS updated FROM (" + given + ") r",
+		args:    args,
+		columns: append(columns, "updated"),
+		// The unique key uk_resmon_1.
+		match:  "t.svc_id = s.svc_id AND t.node_id = s.node_id AND t.vmname = s.vmname AND t.rid = s.rid",
+		update: append(update, "updated = s.updated"),
+	})
+	if err != nil {
 		return err
-	} else if count > 0 {
+	}
+	if count := changed + inserted; count > 0 {
 		oDb.Metrics.ResourceStatusUpdate.Add(float64(count))
 	}
 	return nil

@@ -1,6 +1,9 @@
 package serverhandlers
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestServiceActionCommand(t *testing.T) {
 	cases := []struct {
@@ -18,6 +21,9 @@ func TestServiceActionCommand(t *testing.T) {
 		{"service", "freeze", "pull", "2.1", "", false, "freeze"},
 		{"instance, compliance", "compliance_check", "pull", "2.1", "", true, "compliance check"},
 		{"instance, restart", "restart", "pull", "2.1", "", true, "restart --local"},
+		{"instance slaves, python agent", "thaw --slaves", "pull", "2.1-1234", "", true, "thaw --slaves --local"},
+		{"instance slaves, om3 agent", "thaw --slaves", "feed", "v3.0.0-rc40-2-g2b577", "", true, "instance unfreeze --slaves"},
+		{"instance slaves freeze, om3 agent", "freeze --slaves", "pull", "v3.1.0", "", true, "instance freeze --slaves"},
 		{"push node", "thaw", "push", "2.1", "", true,
 			"ssh -o StrictHostKeyChecking=no -o CheckHostIP=no -o ForwardX11=no -o ConnectTimeout=5 -o PasswordAuthentication=no opensvc@10.0.0.1 -- sudo svcmgr --service svc1 thaw --local"},
 	}
@@ -49,6 +55,9 @@ func TestFactorizeActionEntries(t *testing.T) {
 	if got[2].Rid != "fs#1" || got[2].NodeID != "n2" {
 		t.Errorf("another instance keeps its own entry: %+v", got[2])
 	}
+	if !reflect.DeepEqual(got[0].indexes, []int{1}) || !reflect.DeepEqual(got[1].indexes, []int{0, 2}) || !reflect.DeepEqual(got[2].indexes, []int{3}) {
+		t.Errorf("each entry knows the entries of the list it stands for: %v %v %v", got[0].indexes, got[1].indexes, got[2].indexes)
+	}
 }
 
 func TestActionEntryUnsupportedKeys(t *testing.T) {
@@ -74,6 +83,14 @@ func TestServiceAndInstanceActions(t *testing.T) {
 		if serviceActions[action] {
 			t.Errorf("%s is accepted on a whole service", action)
 		}
+	}
+	for action := range encapActions {
+		if !instanceActions[action] || serviceActions[action] {
+			t.Errorf("%s is accepted on an instance only", action)
+		}
+	}
+	if instanceActions["thaw --master"] || instanceActions["thaw --slaves; reboot"] {
+		t.Error("only the known encap options are accepted")
 	}
 	if serviceActions["rotate_root_pw"] || instanceActions["rotate_root_pw"] {
 		t.Error("a node action is accepted on a service")

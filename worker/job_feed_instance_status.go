@@ -141,13 +141,11 @@ func (d *jobFeedInstanceStatus) findObjectFromDb(ctx context.Context) error {
 }
 
 func (d *jobFeedInstanceStatus) updateDB(ctx context.Context) error {
-	changes := make(map[string]struct{})
 	details, err := d.extractInstanceDetails(
 		ctx,
 		d.status,
 		d.obj,
-		d.node,
-		changes)
+		d.node)
 	if err != nil {
 		return err
 	}
@@ -164,4 +162,9 @@ func (d *jobFeedInstanceStatus) updateDB(ctx context.Context) error {
 func (d *jobFeedInstanceStatus) processed(ctx context.Context) error {
 	_ = d.redis.Publish(ctx, cachekeys.FeedInstanceStatusP, d.idX)
 	return nil
+}
+
+// pushFromTableChanges announces the changes as concerning the instance the node posted: its object and the node.
+func (d *jobFeedInstanceStatus) pushFromTableChanges(ctx context.Context) error {
+	return d.pushScopedTableChanges(ctx, []string{d.objectID}, []string{d.nodeID})
 }

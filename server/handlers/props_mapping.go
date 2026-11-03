@@ -39,6 +39,29 @@ func oidcMappingListCol(name string) *schema.Col {
 	return &schema.Col{T: schema.TAuthOidcMappings, Name: name, Nullable: true}
 }
 
+// The orchestration tables, which the generated schema does not hold yet: the
+// derived tables of the orchestrations and runs lists (cdb/db_orchestrations_list.go)
+// are named after them. To drop once schema/tables.go is generated again from a
+// database holding them.
+var (
+	tOrchestrationsList    = &schema.Table{Name: "orchestrations"}
+	tOrchestrationRunsList = &schema.Table{Name: "orchestration_runs"}
+)
+
+// colIntNullable is an integer column whose NULL stays null: the last run of an
+// orchestration never run, say.
+func colIntNullable(c *schema.Col) propDef {
+	return propDef{Col: c, Kind: "int64"}
+}
+
+func orchestrationListCol(name string) *schema.Col {
+	return &schema.Col{T: tOrchestrationsList, Name: name, Nullable: true}
+}
+
+func orchestrationRunListCol(name string) *schema.Col {
+	return &schema.Col{T: tOrchestrationRunsList, Name: name, Nullable: true}
+}
+
 func col(c *schema.Col) propDef {
 	return propDef{Col: c}
 }
@@ -286,6 +309,33 @@ var propsMapping = map[string]propMapping{
 			"svcname":      colStr(schema.ServicesSvcname),
 			"app":          colStr(schema.AppsApp),
 			"updated":      colStr(schema.DiskinfoDiskUpdated),
+		},
+	},
+	// The backups the backup servers index (saves), with the node and the service
+	// each is of, as the historical Saves view lists them. save_size is in bytes.
+	"save": {
+		PrimaryKey: []*schema.Col{schema.SavesID},
+		Available: []string{
+			"id", "save_server", "save_id", "save_app", "node_id", "nodename", "svc_id", "svcname",
+			"save_name", "save_group", "save_level", "save_size", "save_volume",
+			"save_date", "save_retention",
+		},
+		Props: map[string]propDef{
+			"id":             col(schema.SavesID),
+			"save_server":    colStr(schema.SavesSaveServer),
+			"save_id":        colStr(schema.SavesSaveID),
+			"save_app":       colStr(schema.SavesSaveApp),
+			"node_id":        colStr(schema.SavesNodeID),
+			"nodename":       colStr(schema.NodesNodename),
+			"svc_id":         colStr(schema.SavesSvcID),
+			"svcname":        colStr(schema.ServicesSvcname),
+			"save_name":      colStr(schema.SavesSaveName),
+			"save_group":     colStr(schema.SavesSaveGroup),
+			"save_level":     colStr(schema.SavesSaveLevel),
+			"save_size":      colInt(schema.SavesSaveSize),
+			"save_volume":    colStr(schema.SavesSaveVolume),
+			"save_date":      colStr(schema.SavesSaveDate),
+			"save_retention": colStr(schema.SavesSaveRetention),
 		},
 	},
 	// The disk groups and the quota of an application code on each, read from the
@@ -789,6 +839,52 @@ var propsMapping = map[string]propMapping{
 			"quota_app":                 colStr(schema.AuthUserQuotaApp),
 			"quota_org_group":           colStr(schema.AuthUserQuotaOrgGroup),
 			"quota_docker_registries":   colStr(schema.AuthUserQuotaDockerRegistries),
+		},
+	},
+	// The orchestrations as listed (GET /orchestrations): the columns of the derived
+	// table of cdb/db_orchestrations_list.go. steps is the JSON of the steps; a
+	// filter on it reads the actions of the steps, comma-separated.
+	"orchestrationList": {
+		Available: []string{
+			"id", "name", "description", "steps", "step_count", "created", "updated",
+			"updated_by", "run_count", "last_run_id", "last_run_status", "last_run_started",
+		},
+		Props: map[string]propDef{
+			"id":               colIntNullable(orchestrationListCol("id")),
+			"name":             colStr(orchestrationListCol("name")),
+			"description":      colStr(orchestrationListCol("description")),
+			"steps":            {Col: orchestrationListCol("steps"), SQLExpr: "COALESCE(orchestrations.steps, '[]')", Kind: "string", FilterExpr: "orchestrations.step_actions"},
+			"step_count":       colInt(orchestrationListCol("step_count")),
+			"created":          col(orchestrationListCol("created")),
+			"updated":          col(orchestrationListCol("updated")),
+			"updated_by":       colStr(orchestrationListCol("updated_by")),
+			"run_count":        colInt(orchestrationListCol("run_count")),
+			"last_run_id":      colIntNullable(orchestrationListCol("last_run_id")),
+			"last_run_status":  col(orchestrationListCol("last_run_status")),
+			"last_run_started": col(orchestrationListCol("last_run_started")),
+		},
+	},
+	// The runs as listed (GET /orchestration_runs): the columns of the derived table
+	// of cdb/db_orchestrations_list.go. duration is in seconds, up to now while
+	// the run goes on.
+	"orchestrationRunList": {
+		Available: []string{
+			"id", "orchestration_id", "name", "status", "current_step", "message", "started",
+			"ended", "started_by", "step_count", "steps_done", "duration",
+		},
+		Props: map[string]propDef{
+			"id":               colIntNullable(orchestrationRunListCol("id")),
+			"orchestration_id": colIntNullable(orchestrationRunListCol("orchestration_id")),
+			"name":             colStr(orchestrationRunListCol("name")),
+			"status":           colStr(orchestrationRunListCol("status")),
+			"current_step":     colInt(orchestrationRunListCol("current_step")),
+			"message":          colStr(orchestrationRunListCol("message")),
+			"started":          col(orchestrationRunListCol("started")),
+			"ended":            col(orchestrationRunListCol("ended")),
+			"started_by":       colStr(orchestrationRunListCol("started_by")),
+			"step_count":       colInt(orchestrationRunListCol("step_count")),
+			"steps_done":       colInt(orchestrationRunListCol("steps_done")),
+			"duration":         colInt(orchestrationRunListCol("duration")),
 		},
 	},
 	"tag": {

@@ -10,11 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-redis/redis/v8"
-
 	"github.com/opensvc/oc3/cachekeys"
 	"github.com/opensvc/oc3/cdb"
 	"github.com/opensvc/oc3/util/logkey"
+	"github.com/opensvc/oc3/util/pendingchanges"
 )
 
 type (
@@ -62,9 +61,9 @@ type (
 		nodeEnv     string
 		callerNode  *cdb.DBNode
 
-		changes    map[string]struct{}
-		rawChanges string
-		rawData    []byte
+		changes      map[string]struct{}
+		takenChanges []string
+		rawData      []byte
 
 		data dataProvider
 
@@ -82,9 +81,22 @@ type (
 
 		objmonLogByObjectID   map[string]*cdb.DBObjectStatusLog
 		svcmonLogByInstanceID map[string]*cdb.DBInstanceStatusLog
-		resmonLogByResID      map[string]*cdb.DBResmonLog
+
+		// withResources are the instances, as "svc_id@node_id", having
+		// resources in resmon.
+		withResources    map[string]struct{}
+		resmonLogByResID map[string]*cdb.DBResmonLog
 
 		heartbeats []heartbeatData
+
+		// purgedSvcIDs and purgedNodeIDs are the instances and the services the
+		// job purged, absent from the report: changed too.
+		purgedSvcIDs  []string
+		purgedNodeIDs []string
+
+		// updatedSvcIDs are the objects whose status the job updated, those the
+		// report says changed and those just created: the others are only pinged.
+		updatedSvcIDs []string
 	}
 )
 
@@ -115,6 +127,7 @@ func newDaemonStatus(nodeID string) *jobFeedDaemonStatus {
 
 		objmonLogByObjectID:   make(map[string]*cdb.DBObjectStatusLog),
 		svcmonLogByInstanceID: make(map[string]*cdb.DBInstanceStatusLog),
+		withResources:         make(map[string]struct{}),
 		resmonLogByResID:      make(map[string]*cdb.DBResmonLog),
 	}
 }
@@ -144,32 +157,46 @@ func (d *jobFeedDaemonStatus) Operations() []operation {
 	}
 }
 
+// pushFromTableChanges announces the changes as concerning the nodes of the
+// cluster, the objects whose status the job updated, and those it purged: the
+// other objects of the report were only pinged, their status unchanged.
+func (d *jobFeedDaemonStatus) pushFromTableChanges(ctx context.Context) error {
+	svcIDs := append(append([]string{}, d.updatedSvcIDs...), d.purgedSvcIDs...)
+	nodeIDs := append([]string{d.nodeID}, d.purgedNodeIDs...)
+	for id := range d.byNodeID {
+		nodeIDs = append(nodeIDs, id)
+	}
+	return d.pushScopedTableChanges(ctx, svcIDs, nodeIDs)
+}
+
 func (d *jobFeedDaemonStatus) LogResult() {
 	slog.Debug(fmt.Sprintf("handleDaemonStatus done for %s", d.byNodeID[d.nodeID]))
 }
 
+// getChanges takes the changes the node reported since the last run: the
+// objects and instances listed are written in full, the others only have their
+// timestamps renewed.
 func (d *jobFeedDaemonStatus) getChanges(ctx context.Context) error {
-	s, err := d.redis.HGet(ctx, cachekeys.FeedDaemonStatusChangesH, d.nodeID).Result()
-	if err == nil {
-		// TODO: fix possible race:
-		// worker iteration 1: pickup changes 'a'
-		// listener: read previous changes 'a'
-		// listener: merge b => set changes from 'a' to 'a', 'b'
-		// listener: ask for new worker iteration 2
-		// worker iteration 1: delete changes the 'b' => 'b' change is lost
-		// worker iteration 1: ... done
-		// worker iteration 2: pickup changes: empty instead of expected 'b'
-		if err := d.redis.HDel(ctx, cachekeys.FeedDaemonStatusChangesH, d.nodeID).Err(); err != nil {
-			return fmt.Errorf("getChanges: HDEL %s %s: %w", cachekeys.FeedDaemonStatusChangesH, d.nodeID, err)
-		}
-	} else if !errors.Is(err, redis.Nil) {
-		return fmt.Errorf("getChanges: HGET %s %s: %w", cachekeys.FeedDaemonStatusChangesH, d.nodeID, err)
+	l, err := pendingchanges.Take(ctx, d.redis, cachekeys.FeedDaemonStatusChangesH, d.nodeID)
+	if err != nil {
+		return fmt.Errorf("getChanges: %w", err)
 	}
-	d.rawChanges = s
-	for _, change := range strings.Fields(s) {
+	d.takenChanges = l
+	for _, change := range l {
 		d.changes[change] = struct{}{}
 	}
 	return nil
+}
+
+// onFailure gives the changes taken back to the next run: dropped, the objects
+// and instances they list would keep a stale status until their next change.
+// The job context may be the cause of the failure, cancelled at shutdown.
+func (d *jobFeedDaemonStatus) onFailure(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := pendingchanges.Merge(ctx, d.redis, cachekeys.FeedDaemonStatusChangesH, d.nodeID, d.takenChanges); err != nil {
+		d.Logger().Error("cannot give the changes back", logkey.Changes, d.takenChanges, logkey.Error, err)
+	}
 }
 
 func (d *jobFeedDaemonStatus) getData(ctx context.Context) error {
@@ -279,7 +306,7 @@ func (d *jobFeedDaemonStatus) dbFetchNodes(ctx context.Context) (err error) {
 		return fmt.Errorf("dbFetchNodes %s [%s] can't update node last comm for node ids %s: %w", d.callerNode, d.nodeID, nodeIDs, err)
 	}
 
-	slog.Debug(fmt.Sprintf("handleDaemonStatus run details: %s changes: [%s]", d.callerNode, d.rawChanges))
+	slog.Debug(fmt.Sprintf("handleDaemonStatus run details: %s changes: [%s]", d.callerNode, strings.Join(d.takenChanges, " ")))
 	return nil
 }
 
@@ -494,6 +521,13 @@ func (d *jobFeedDaemonStatus) dbFindInstances(ctx context.Context) error {
 	for nodeID := range d.byNodeID {
 		nodeIDs = append(nodeIDs, nodeID)
 	}
+	if l, err := d.oDb.ResmonInstancesFromObjectIDs(ctx, nodeIDs, objectIDs...); err != nil {
+		return fmt.Errorf("dbFindInstances ResmonInstancesFromObjectIDs: %w", err)
+	} else {
+		for _, id := range l {
+			d.withResources[id] = struct{}{}
+		}
+	}
 	if resmonLogLastL, err := d.oDb.ResmonLogLastFromObjectIDs(ctx, nodeIDs, objectIDs...); err != nil {
 		return fmt.Errorf("dbFindInstances ResmonLogLastFromObjectIDs: %w", err)
 	} else {
@@ -550,6 +584,7 @@ func (d *jobFeedDaemonStatus) dbUpdateServices(ctx context.Context) error {
 		if !isChanged && obj.AvailStatus != "undef" {
 			objectIDPingM[objectID] = struct{}{}
 		} else {
+			d.updatedSvcIDs = append(d.updatedSvcIDs, objectID)
 			oStatus := d.data.objectStatus(objectName)
 			if oStatus != nil {
 				// refresh local cache
@@ -635,11 +670,13 @@ func (d *jobFeedDaemonStatus) dbUpdateInstances(ctx context.Context) error {
 
 	dashboardUpdateObjectFlexStartedL := make([]*cdb.DashboardUpdateObjectFlexStartedParams, 0)
 
-	objectIDL := make([]string, 0, len(d.byInstanceID))
-	for i := range d.byInstanceID {
-		objectIDL = append(objectIDL, i)
+	// The objects of the report in an acknowledged unavailability period: their
+	// unavailable, placement and degraded alerts are not raised.
+	objectIDL := make([]string, 0, len(d.byObjectName))
+	for _, obj := range d.byObjectName {
+		objectIDL = append(objectIDL, obj.SvcID)
 	}
-	if inAckPeriodL, err := d.oDb.ObjectInAckUnavailabilityPeriod(ctx, d.nodeID); err != nil {
+	if inAckPeriodL, err := d.oDb.ObjectInAckUnavailabilityPeriod(ctx, objectIDL...); err != nil {
 		return fmt.Errorf("dbUpdateInstances ObjectInAckUnavailabilityPeriod: %w", err)
 	} else {
 		for _, i := range inAckPeriodL {
@@ -660,7 +697,22 @@ func (d *jobFeedDaemonStatus) dbUpdateInstances(ctx context.Context) error {
 			if iStatus == nil {
 				continue
 			}
-			result, err := d.extractInstanceDetails(ctx, iStatus, obj, node, d.changes)
+			// An instance the node does not report changed only has its
+			// timestamps renewed, as in the legacy collector: rewriting its rows
+			// at each report would consume an auto-increment value per row. One
+			// not yet recorded, or of an object with no status yet, is written
+			// in full, as is one whose resources are missing from resmon
+			// (purged while the instance was absent from a report): renewing
+			// timestamps would not bring them back.
+			_, isChanged := d.changes[objectName+"@"+nodename]
+			_, isKnown := d.byInstanceID[objID+"@"+nodeID]
+			_, hasResources := d.withResources[objID+"@"+nodeID]
+			isComplete := hasResources || len(iStatus.resources) == 0
+			if !isChanged && isKnown && isComplete && obj.AvailStatus != "undef" {
+				objectIDsToPingByNodeID[nodeID] = append(objectIDsToPingByNodeID[nodeID], objID)
+				continue
+			}
+			result, err := d.extractInstanceDetails(ctx, iStatus, obj, node)
 			if err != nil {
 				return err
 			}
@@ -711,9 +763,6 @@ func (d *jobFeedDaemonStatus) dbUpdateInstances(ctx context.Context) error {
 				}
 			}
 
-			if result.pingInstance {
-				objectIDsToPingByNodeID[nodeID] = append(objectIDsToPingByNodeID[nodeID], objID)
-			}
 			if result.dropInstance {
 				objectIDsToDropByNodeID[nodeID] = append(objectIDsToDropByNodeID[nodeID], objID)
 			}
@@ -880,6 +929,8 @@ func (d *jobFeedDaemonStatus) dbPurgeInstances(ctx context.Context) error {
 		return fmt.Errorf("dbPurgeInstances: getOrphanInstances: %w", err)
 	}
 	for _, instanceID := range instanceIDs {
+		d.purgedSvcIDs = append(d.purgedSvcIDs, instanceID.SvcID())
+		d.purgedNodeIDs = append(d.purgedNodeIDs, instanceID.NodeID())
 		if err1 := d.oDb.PurgeInstance(ctx, instanceID); err1 != nil {
 			err = errors.Join(err, fmt.Errorf("purge instance %v: %w", instanceID, err1))
 		}
@@ -897,6 +948,7 @@ func (d *jobFeedDaemonStatus) dbPurgeServices(ctx context.Context) error {
 		return err
 	}
 	for _, objectID := range objectIDs {
+		d.purgedSvcIDs = append(d.purgedSvcIDs, objectID)
 		if err1 := d.oDb.PurgeTablesFromObjectID(ctx, objectID); err1 != nil {
 			err = errors.Join(err, fmt.Errorf("purge object %s: %w", objectID, err1))
 		}

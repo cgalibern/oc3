@@ -30,6 +30,9 @@ type actionEntry struct {
 	VMName    string `json:"vmname"`
 
 	unsupported []string
+	// indexes are the positions in the list sent of the entries this one
+	// stands for: several once merged (factorizeActionEntries).
+	indexes []int
 }
 
 // unsupportedActionKeys are accepted by the historical collector but not ported:
@@ -59,7 +62,7 @@ func (e *actionEntry) UnmarshalJSON(data []byte) error {
 // service make an instance action, a service alone a service action, a node alone
 // a node action, a cluster alone a cluster action. vmname names the node in
 // place of node_id.
-func (a *Api) queueActionEntry(c echo.Context, log *slog.Logger, ctx context.Context, e actionEntry) (*queuedAction, error) {
+func (a *Api) queueActionEntry(act actionActor, log *slog.Logger, ctx context.Context, e actionEntry) (*queuedAction, error) {
 	if len(e.unsupported) > 0 {
 		return nil, refuseAction(http.StatusBadRequest, "unsupported keys: %s", strings.Join(e.unsupported, ", "))
 	}
@@ -76,17 +79,17 @@ func (a *Api) queueActionEntry(c echo.Context, log *slog.Logger, ctx context.Con
 		if nodeID != "" || e.SvcID != "" || e.Rid != "" {
 			return nil, refuseAction(http.StatusBadRequest, "cluster_id excludes node_id, vmname, svc_id and rid")
 		}
-		return a.queueClusterAction(c, log, ctx, e.ClusterID, e.Action)
+		return a.queueClusterAction(act, log, ctx, e.ClusterID, e.Action)
 	}
 	switch {
 	case e.SvcID != "" && nodeID != "":
-		return a.queueInstanceAction(c, log, ctx, nodeID, e.SvcID, e.Action, e.Rid)
+		return a.queueInstanceAction(act, log, ctx, nodeID, e.SvcID, e.Action, e.Rid)
 	case e.Rid != "":
 		return nil, refuseAction(http.StatusBadRequest, "rid requires both node_id and svc_id")
 	case nodeID != "":
-		return a.queueNodeAction(c, log, ctx, nodeID, e.Action)
+		return a.queueNodeAction(act, log, ctx, nodeID, e.Action)
 	case e.SvcID != "":
-		return a.queueServiceAction(c, log, ctx, e.SvcID, e.Action)
+		return a.queueServiceAction(act, log, ctx, e.SvcID, e.Action)
 	}
 	return nil, refuseAction(http.StatusBadRequest, "node_id, svc_id or cluster_id must be specified")
 }
@@ -99,7 +102,9 @@ func factorizeActionEntries(entries []actionEntry) []actionEntry {
 	var out []actionEntry
 	var order []key
 	rids := map[key][]string{}
-	for _, e := range entries {
+	indexes := map[key][]int{}
+	for i, e := range entries {
+		e.indexes = []int{i}
 		nodeID := e.NodeID
 		if e.VMName != "" {
 			nodeID = e.VMName
@@ -113,9 +118,10 @@ func factorizeActionEntries(entries []actionEntry) []actionEntry {
 			order = append(order, k)
 		}
 		rids[k] = append(rids[k], e.Rid)
+		indexes[k] = append(indexes[k], i)
 	}
 	for _, k := range order {
-		out = append(out, actionEntry{NodeID: k.nodeID, SvcID: k.svcID, Action: k.action, Rid: strings.Join(rids[k], ",")})
+		out = append(out, actionEntry{NodeID: k.nodeID, SvcID: k.svcID, Action: k.action, Rid: strings.Join(rids[k], ","), indexes: indexes[k]})
 	}
 	return out
 }
@@ -176,10 +182,15 @@ func (a *Api) PutActions(c echo.Context) error {
 		}
 		var ids []int64
 		refusals := []string{}
+		// The refusals by entry of the list sent, for the caller to name each.
+		refused := []refusedEntry{}
 		for _, e := range factorizeActionEntries(entries) {
-			queued, err := a.queueActionEntry(c, log, ctx, e)
+			queued, err := a.queueActionEntry(actorOf(c), log, ctx, e)
 			if err != nil {
 				refusals = append(refusals, describeRefusal(e, err))
+				for _, i := range e.indexes {
+					refused = append(refused, refusedEntry{Index: i, Message: refusalMessage(err)})
+				}
 				continue
 			}
 			ids = append(ids, queued.ID)
@@ -195,9 +206,10 @@ func (a *Api) PutActions(c echo.Context) error {
 			return JSONProblemf(c, http.StatusInternalServerError, "actions queued, but cannot read them back")
 		}
 		return c.JSON(http.StatusOK, map[string]any{
-			"info":  []string{fmt.Sprintf("%d action(s) queued", len(ids))},
-			"error": refusals,
-			"data":  rows,
+			"info":     []string{fmt.Sprintf("%d action(s) queued", len(ids))},
+			"error":    refusals,
+			"data":     rows,
+			"refusals": refused,
 		})
 	}
 
@@ -205,7 +217,7 @@ func (a *Api) PutActions(c echo.Context) error {
 	if err := json.Unmarshal(raw, &entry); err != nil {
 		return JSONProblem(c, http.StatusBadRequest, err.Error())
 	}
-	queued, err := a.queueActionEntry(c, log, ctx, entry)
+	queued, err := a.queueActionEntry(actorOf(c), log, ctx, entry)
 	if err != nil {
 		return actionProblem(c, err)
 	}
@@ -218,6 +230,12 @@ func (a *Api) PutActions(c echo.Context) error {
 		return JSONProblemf(c, http.StatusInternalServerError, "action %d queued, but cannot read it back", queued.ID)
 	}
 	return c.JSON(http.StatusOK, newListResponse(rows, propsMapping["action_queue"], query))
+}
+
+// refusedEntry is a refused entry of a list, by its index in the list sent.
+type refusedEntry struct {
+	Index   int    `json:"index"`
+	Message string `json:"message"`
 }
 
 // describeRefusal names the refused entry in the message of a list answer.

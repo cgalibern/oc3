@@ -60,6 +60,10 @@ func setDefaultServerConfig() {
 	viper.SetDefault(s+".metrics.enable", false)
 	viper.SetDefault(s+".ui.enable", false)
 	viper.SetDefault(s+".sync.timeout", "2s")
+	// The packages diffs: computed at most this many at once, each given this
+	// long, and cached in redis until the packages of a compared node change.
+	viper.SetDefault(s+".packages_diff.concurrency", 2)
+	viper.SetDefault(s+".packages_diff.timeout", "30s")
 	viper.SetDefault(s+".allow_anon_register", false)
 	// A node may register a node joining its cluster, already registered.
 	viper.SetDefault(s+".allow_node_enroll", true)
@@ -72,9 +76,33 @@ func setDefaultServerConfig() {
 	// One git repository holding the compliance export, committed at each commit
 	// of the compliance designer.
 	viper.SetDefault(s+".directories.compliance", "/oc3/uploads/compliance")
-	// The javascript sandbox running the manglers of the form rest outputs.
-	viper.SetDefault(s+".forms.nodejs", "/usr/bin/nodejs")
-	viper.SetDefault(s+".forms.vm2", "/usr/local/bin/vm2")
+	// The bare git repository of the compliance modules, archived for the agents
+	// (om node updatecomp).
+	viper.SetDefault(s+".directories.compliance_modules", "/oc3/uploads/compliance_modules.git")
+	// Serve the archive of the compliance modules (GET
+	// /compliance/modules_repo/current) to unauthenticated callers too: the v2
+	// agents' om node updatecomp fetches it without credentials. Off by default:
+	// the modules, and what they reveal of the hosts, are then for authenticated
+	// nodes and users only. Read at start.
+	viper.SetDefault(s+".compliance_modules.anonymous_download", false)
+	// How long the mangler of a form rest output may run, in the javascript
+	// interpreter of oc3 (server/handlers/forms_mangle.go).
+	viper.SetDefault(s+".forms.mangle_timeout", "5s")
+	// The longest a statement of the API runs in the database, see newServer.
+	// 0: no limit.
+	viper.SetDefault(s+".db.max_statement_time", "60s")
+	// meta.total of a list is counted up to this many rows, and left out above:
+	// counting millions of rows for the page count costs more than the page.
+	// 0: always counted.
+	viper.SetDefault(s+".list.total_max", 10000)
+	// The external hosts a rest output may call by its absolute url, "host" or
+	// "host:port"; none by default: an external API is called through a connector.
+	viper.SetDefault(s+".forms.external_hosts", []string{})
+	// The loopback, private or reserved networks those hosts may resolve to, as
+	// CIDR prefixes; the public addresses are always allowed (see util/egress).
+	viper.SetDefault(s+".forms.external_networks", []string{})
+	viper.SetDefault(s+".forms.external_timeout", "60s")
+	viper.SetDefault(s+".forms.external_max_bytes", 10*1024*1024)
 	viper.SetDefault(s+".log.request.level", "none")
 
 	setDefaultAuthConfig()
@@ -155,6 +183,10 @@ func setDefaultDBConfig() {
 	viper.SetDefault("db.port", "3306")
 	viper.SetDefault("db.log.level", "warn")
 	viper.SetDefault("db.log.slow_query_threshold", "1s")
+	// enforce: the subsystems wait up to db.schema.wait for oc3 db migrate, then
+	// refuse to start on a schema missing a migration; warn: they log it and start.
+	viper.SetDefault("db.schema.check", "enforce")
+	viper.SetDefault("db.schema.wait", "5m")
 }
 
 func setDefaultRedisConfig() {
