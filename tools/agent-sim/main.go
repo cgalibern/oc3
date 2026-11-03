@@ -242,6 +242,7 @@ func cmdRun(args []string) error {
 	results := fs.String("results", "results", "directory of the run results: a sub-directory by run")
 	name := fs.String("name", "", "run name (default: the date)")
 	redisAddr := fs.String("redis", "", "redis address of the collector (host:port), to follow the length of the worker queues")
+	metricsURLs := fs.String("metrics", "", "comma-separated base URLs of the oc3 workers (http://host:port), to follow the length of the worker queues from their /metrics when redis is not reachable")
 	reportEvery := fs.Duration("report-every", 30*time.Second, "report period")
 	_ = fs.Parse(args)
 	f, err := newFleet(*spec)
@@ -266,8 +267,14 @@ func cmdRun(args []string) error {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	if *redisAddr != "" {
-		go rec.sampleQueues(ctx, *redisAddr, dir)
+	if *redisAddr != "" || *metricsURLs != "" {
+		var urls []string
+		for _, u := range strings.Split(*metricsURLs, ",") {
+			if u = strings.TrimSpace(u); u != "" {
+				urls = append(urls, u)
+			}
+		}
+		go rec.sampleQueues(ctx, *redisAddr, urls, dir)
 	}
 	go func() {
 		ticker := time.NewTicker(*reportEvery)

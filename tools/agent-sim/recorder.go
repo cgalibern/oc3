@@ -4,12 +4,16 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -142,11 +146,20 @@ func (r *recorder) report(period time.Duration) {
 		elapsed, float64(count)/period.Seconds(), errs, percentile(all, .5), percentile(all, .95), percentile(all, .99), percentile(all, 1), queued, detail)
 }
 
-// sampleQueues follows the length of the worker queues of oc3 in redis: a
-// queue that grows is a worker that does not keep up with the feed.
-func (r *recorder) sampleQueues(ctx context.Context, addr string, dir string) {
-	client := redis.NewClient(&redis.Options{Addr: addr})
-	defer func() { _ = client.Close() }()
+// sampleQueues follows the length of the worker queues of oc3: a queue that
+// grows is a worker that does not keep up with the feed. The lengths come
+// from redis (addr host:port), or from the prometheus metrics of the workers
+// (metricsURLs, one http://host:port per worker) when the collector's redis is
+// not reachable from where the simulator runs.
+func (r *recorder) sampleQueues(ctx context.Context, addr string, metricsURLs []string, dir string) {
+	var read func(context.Context) (map[string]int64, error)
+	if addr != "" {
+		client := redis.NewClient(&redis.Options{Addr: addr})
+		defer func() { _ = client.Close() }()
+		read = func(ctx context.Context) (map[string]int64, error) { return redisQueues(ctx, client) }
+	} else {
+		read = func(ctx context.Context) (map[string]int64, error) { return metricsQueues(ctx, metricsURLs) }
+	}
 	f, err := os.Create(filepath.Join(dir, "queues.csv"))
 	if err != nil {
 		_, _ = fmt.Fprintln(r.out, "queues:", err)
@@ -157,14 +170,15 @@ func (r *recorder) sampleQueues(ctx context.Context, addr string, dir string) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
-		keys, err := client.Keys(ctx, "oc3:q:*").Result()
+		lengths, err := read(ctx)
 		if err == nil {
-			lengths := map[string]int64{}
-			for _, k := range keys {
-				if n, err := client.LLen(ctx, k).Result(); err == nil {
-					lengths[strings.TrimPrefix(k, "oc3:q:")] = n
-					_, _ = fmt.Fprintf(f, "%.0f,%s,%d\n", time.Since(r.begin).Seconds(), strings.TrimPrefix(k, "oc3:q:"), n)
-				}
+			names := make([]string, 0, len(lengths))
+			for k := range lengths {
+				names = append(names, k)
+			}
+			sort.Strings(names)
+			for _, k := range names {
+				_, _ = fmt.Fprintf(f, "%.0f,%s,%d\n", time.Since(r.begin).Seconds(), k, lengths[k])
 			}
 			r.qmu.Lock()
 			r.queues = lengths
@@ -178,6 +192,69 @@ func (r *recorder) sampleQueues(ctx context.Context, addr string, dir string) {
 		case <-ticker.C:
 		}
 	}
+}
+
+// redisQueues reads the queue lengths from the oc3:q:* lists of redis.
+func redisQueues(ctx context.Context, client *redis.Client) (map[string]int64, error) {
+	keys, err := client.Keys(ctx, "oc3:q:*").Result()
+	if err != nil {
+		return nil, err
+	}
+	lengths := map[string]int64{}
+	for _, k := range keys {
+		if n, err := client.LLen(ctx, k).Result(); err == nil {
+			lengths[strings.TrimPrefix(k, "oc3:q:")] = n
+		}
+	}
+	return lengths, nil
+}
+
+// metricsQueues reads the oc3_feed_queue_length gauges exposed on /metrics by
+// the workers (worker.<name>.metrics.enable in the oc3 config), each worker
+// reporting the queues it consumes.
+func metricsQueues(ctx context.Context, urls []string) (map[string]int64, error) {
+	lengths := map[string]int64{}
+	var errs []string
+	for _, u := range urls {
+		if err := scrapeQueues(ctx, u, lengths); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %s", u, err))
+		}
+	}
+	if len(errs) == len(urls) {
+		return nil, errors.New(strings.Join(errs, "; "))
+	}
+	return lengths, nil
+}
+
+var queueMetricRE = regexp.MustCompile(`^oc3_feed_queue_length\{queue="([^"]*)"\}\s+(\S+)`)
+
+func scrapeQueues(ctx context.Context, u string, lengths map[string]int64) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(u, "/")+"/metrics", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := (&http.Client{Timeout: 4 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("status %s", resp.Status)
+	}
+	sc := bufio.NewScanner(resp.Body)
+	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		m := queueMetricRE.FindStringSubmatch(sc.Text())
+		if m == nil {
+			continue
+		}
+		v, err := strconv.ParseFloat(m[2], 64)
+		if err != nil {
+			continue
+		}
+		lengths[strings.TrimPrefix(m[1], "oc3:q:")] = int64(v)
+	}
+	return sc.Err()
 }
 
 func (r *recorder) queueTotal() (int64, string) {

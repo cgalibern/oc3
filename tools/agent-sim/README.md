@@ -54,8 +54,21 @@ The fleet flags of `setup` and `run` must be the same. The agents date the
 lines of the action logs in their local time: run with the TZ of the collector
 (`TZ=Europe/Paris`).
 
-On the dev stack, the feeder and redis listen in the network namespace of the
-service: run there.
+The queue lengths can also come from the `/metrics` of the workers instead of
+redis, when the workers run with `worker.<name>.metrics.enable: true` and an
+`addr` reachable from the simulator: `--metrics http://host:8100,http://host:8101`
+(one URL per worker, each reporting the queues it consumes).
+
+On the dev stack, redis listens on the loopback of the network namespace of
+the service, but the feeder and the workers listen on its backend address:
+run from the host with `--metrics`.
+
+```sh
+TZ=Europe/Paris ./agent-sim run --feeder http://10.147.0.46:8080 \
+    --metrics http://10.147.0.46:8100,http://10.147.0.46:8101 ...
+```
+
+Or run in the namespace with `--redis`:
 
 ```sh
 sudo docker run --rm --network container:dev..oc3.container.0 -e TZ=Europe/Paris \
@@ -74,7 +87,7 @@ In `results/<name>/`:
 - `run.json`: the flags of the run;
 - `samples.csv`: every request, its endpoint, code, duration and size;
 - `windows.csv`: by `--report-every` period, the rate, errors and percentiles;
-- `queues.csv`: with `--redis`, the length of each worker queue every 5s: a
+- `queues.csv`: with `--redis` or `--metrics`, the length of each worker queue every 5s: a
   queue that grows is a worker not keeping up with the feed;
 - `summary.json`: by endpoint, the count, errors, rate and percentiles.
 
