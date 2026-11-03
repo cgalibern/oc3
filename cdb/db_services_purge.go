@@ -3,6 +3,7 @@ package cdb
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -53,6 +54,45 @@ func (oDb *DB) PurgeableServiceIDs(ctx context.Context, maxAge time.Duration, li
 		return nil, fmt.Errorf("PurgeableServiceIDs: %w", err)
 	}
 	return ids, nil
+}
+
+// servicesLogPurgeBatch is the count of rows a purge of the services status
+// logs deletes in one statement, each its own transaction.
+const servicesLogPurgeBatch = 10000
+
+// PurgeServicesLogOrphans deletes the availability logs, services_log and
+// services_log_last, of the services that no longer exist and whose log ended
+// before minAge: a log of a service being created, written meanwhile, is kept.
+// The deletion of a service used to keep them, and the tables grew without end.
+// It returns the number of deleted rows.
+func (oDb *DB) PurgeServicesLogOrphans(ctx context.Context, minAge time.Duration) (int64, error) {
+	defer logDuration("PurgeServicesLogOrphans", time.Now())
+	var total int64
+	for _, table := range []string{"services_log_last", "services_log"} {
+		query := "DELETE FROM `" + table + "`" +
+			" WHERE `svc_end` < DATE_SUB(NOW(), INTERVAL ? SECOND)" +
+			" AND NOT EXISTS (SELECT 1 FROM `services` s WHERE s.`svc_id` = `" + table + "`.`svc_id`)" +
+			" LIMIT " + strconv.Itoa(servicesLogPurgeBatch)
+		var deleted int64
+		for {
+			count, err := oDb.execCountContext(ctx, query, maxAgeSeconds(minAge))
+			if err != nil {
+				return total + deleted, fmt.Errorf("purgeServicesLogOrphans %s: %w", table, err)
+			}
+			deleted += count
+			if count < servicesLogPurgeBatch {
+				break
+			}
+			if err := ctx.Err(); err != nil {
+				return total + deleted, err
+			}
+		}
+		if deleted > 0 {
+			oDb.SetChange(table)
+		}
+		total += deleted
+	}
+	return total, nil
 }
 
 // PurgeOrphanServiceTags deletes the svc_tags rows whose service no longer

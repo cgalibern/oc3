@@ -334,6 +334,8 @@ var serviceCascadeTables = []string{
 	"svcmon_log_last",
 	"resmon_log_last",
 	"dashboard_events",
+	"services_log",
+	"services_log_last",
 }
 
 func (oDb *DB) DeleteServiceCascade(ctx context.Context, svcID string) error {
@@ -353,7 +355,7 @@ func (oDb *DB) DeleteServiceCascade(ctx context.Context, svcID string) error {
 }
 
 // DeleteServicesCascade deletes several services as DeleteServiceCascade does
-// one, a statement per table for all of them: a batch costs the 25 statements
+// one, a statement per table for all of them: a batch costs the statements
 // once, not once per service.
 func (oDb *DB) DeleteServicesCascade(ctx context.Context, svcIDs []string) error {
 	defer logDuration("DeleteServicesCascade", time.Now())
