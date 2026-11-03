@@ -3,6 +3,8 @@ package cdb
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 )
 
 // StatusPeriod is a period during which a service, or an instance, kept the
@@ -204,22 +206,41 @@ type ServiceAvailability struct {
 }
 
 // SetServicesAvailability stores the availability rate of services and its
-// trend, nil clearing them, with the time they were computed.
+// trend, nil clearing them, with the time they were computed. The rates are
+// stored by one statement, hence one commit, whatever their number: a statement
+// and a commit by service could not store the rates of tens of thousands of
+// services within the period of the task.
 func (oDb *DB) SetServicesAvailability(ctx context.Context, rates map[string]ServiceAvailability) error {
+	if len(rates) == 0 {
+		return nil
+	}
+	query, args := servicesAvailabilityUpdate(rates)
+	if _, err := oDb.DB.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("setServicesAvailability: %w", err)
+	}
+	return nil
+}
+
+// servicesAvailabilityUpdate returns the UPDATE storing the rates, and its
+// arguments. It only updates the services still there: a service purged
+// meanwhile is not created again. The services are given in the order of their
+// svc_id, for the rows to be locked in the same order by concurrent updates.
+func servicesAvailabilityUpdate(rates map[string]ServiceAvailability) (string, []any) {
 	value := func(v *float64) any {
 		if v == nil {
 			return nil
 		}
 		return *v
 	}
-	for svcID, a := range rates {
-		if _, err := oDb.DB.ExecContext(ctx,
-			"UPDATE services SET svc_availability = ?, svc_availability_trend = ?, svc_availability_updated = NOW() WHERE svc_id = ?",
-			value(a.Rate), value(a.Trend), svcID); err != nil {
-			return fmt.Errorf("setServicesAvailability: %w", err)
-		}
+	ids := slices.Sorted(maps.Keys(rates))
+	rows := make([][]any, len(ids))
+	for i, id := range ids {
+		rows[i] = []any{id, value(rates[id].Rate), value(rates[id].Trend)}
 	}
-	return nil
+	given, args := givenRows([]string{"svc_id", "svc_availability", "svc_availability_trend"}, rows)
+	query := "UPDATE services s JOIN (" + given + ") r ON s.svc_id = r.svc_id" +
+		" SET s.svc_availability = r.svc_availability, s.svc_availability_trend = r.svc_availability_trend, s.svc_availability_updated = NOW()"
+	return query, args
 }
 
 // ServiceIDs returns the id of every service.
