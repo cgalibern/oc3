@@ -781,7 +781,7 @@ func (oDb *DB) InstancesOutdated(ctx context.Context, maxAge time.Duration) (ins
 
 func (oDb *DB) LogInstancesNotUpdated(ctx context.Context, maxAge time.Duration) error {
 	request := fmt.Sprintf(`INSERT IGNORE
-             INTO log
+             INTO log (id, log_action, log_user, log_fmt, log_dict, log_date, svc_id, log_gtalk_sent, log_email_sent, log_entry_id, log_level, node_id)
                SELECT NULL,
                       "service.status",
                       "scheduler",
