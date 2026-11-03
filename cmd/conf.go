@@ -187,6 +187,11 @@ func setDefaultDBConfig() {
 	// refuse to start on a schema missing a migration; warn: they log it and start.
 	viper.SetDefault("db.schema.check", "enforce")
 	viper.SetDefault("db.schema.wait", "5m")
+	// connection pool of each subsystem: 0 means no limit for max_open_conns
+	// and conn_max_lifetime, no idle connection kept for max_idle_conns.
+	viper.SetDefault("db.max_open_conns", 10)
+	viper.SetDefault("db.max_idle_conns", 10)
+	viper.SetDefault("db.conn_max_lifetime", "3m")
 }
 
 func setDefaultRedisConfig() {

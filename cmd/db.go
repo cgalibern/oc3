@@ -47,9 +47,9 @@ func openDatabase(vars map[string]string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	db.SetConnMaxLifetime(time.Minute * 3)
-	db.SetMaxOpenConns(10)
-	db.SetMaxIdleConns(10)
+	db.SetConnMaxLifetime(viper.GetDuration("db.conn_max_lifetime"))
+	db.SetMaxOpenConns(viper.GetInt("db.max_open_conns"))
+	db.SetMaxIdleConns(viper.GetInt("db.max_idle_conns"))
 
 	// expose the connection pool usage as go_sql_*{db_name="opensvc"}
 	if err := prometheus.Register(collectors.NewDBStatsCollector(db, cfg.DBName)); err != nil {
