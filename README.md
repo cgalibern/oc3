@@ -36,6 +36,15 @@ server:
     enable: true
 
 scheduler:
+  task:
+    purge_services:
+      # Delete, with their history, the services that no instance reports
+      # anymore and whose status is older than max_age. Services tagged
+      # @purge are deleted as soon as they have no instance left, whatever
+      # max_age. 0 (the default) disables the age based purge. Units: s, m,
+      # h, d. At most batch_size services are deleted per hourly run.
+      max_age: 0
+      batch_size: 1000
   pprof:
     ux.socket: /oc3/scheduler.pprof
     ux.enable: true
