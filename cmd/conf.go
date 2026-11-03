@@ -91,6 +91,8 @@ func setDefaultSchedulerConfig() {
 	viper.SetDefault(s+".metrics.enable", false)
 	viper.SetDefault(s+".task.trim.retention", 365)
 	viper.SetDefault(s+".task.trim.batch_size", 1000)
+	viper.SetDefault(s+".task.purge_services.max_age", "0")
+	viper.SetDefault(s+".task.purge_services.batch_size", 1000)
 	viper.SetDefault(s+".task.alert_checks_not_updated.max_age", "1d")
 	viper.SetDefault(s+".task.alert_instances_not_updated.max_age", "16m")
 	viper.SetDefault(s+".task.alert_nodes_not_updated.max_age", "25h")
