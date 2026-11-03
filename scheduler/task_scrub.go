@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/spf13/viper"
@@ -232,6 +233,26 @@ func taskScrubInstances(ctx context.Context, task *Task) error {
 	return odb.Commit()
 }
 
+// scrubBatch is the count of services, or resources, a scrub task sets to
+// undef together: a few statements for the batch, each committed alone. A
+// batch done is kept when the task times out, the next run going on with the
+// remaining ones, instead of doing the same work again on every run.
+const scrubBatch = 1000
+
+// scrubByBatch calls fn with the items by batches of size, until ctx is done or
+// fn fails.
+func scrubByBatch[T any](ctx context.Context, items []T, size int, fn func(context.Context, []T) error) error {
+	for batch := range slices.Chunk(items, size) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := fn(ctx, batch); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func taskScrubResources(ctx context.Context, task *Task) error {
 	odb, err := task.DBX(ctx)
 	if err != nil {
@@ -248,23 +269,33 @@ func taskScrubResources(ctx context.Context, task *Task) error {
 	if err != nil {
 		return err
 	}
-
-	n := len(resources)
-	if n == 0 {
+	if len(resources) == 0 {
 		return nil
 	}
 
-	names := make([]string, n)
+	err = scrubByBatch(ctx, resources, scrubBatch, func(ctx context.Context, batch []cdb.ResourceMeta) error {
+		return scrubResourcesBatch(ctx, task, odb, batch)
+	})
+	if err != nil {
+		return err
+	}
+	if err := odb.Session.NotifyChanges(ctx); err != nil {
+		return err
+	}
+	return odb.Commit()
+}
 
-	// Historize `resmon` lines we will touch
+// scrubResourcesBatch historizes the status change of the resources, sets them
+// undef and logs it.
+func scrubResourcesBatch(ctx context.Context, task *Task, odb *cdb.DB, resources []cdb.ResourceMeta) error {
+	n := len(resources)
+	if err := odb.ResourcesUpdateLog(ctx, resources, "undef"); err != nil {
+		return err
+	}
+	names := make([]string, n)
 	for i, resource := range resources {
 		names[i] = resource.String()
-		if err := odb.ResourceUpdateLog(ctx, resource, "undef"); err != nil {
-			return err
-		}
 	}
-
-	// Update the `resmon` table
 	if modified, err := odb.ResourceUpdateStatus(ctx, resources, "undef"); err != nil {
 		return err
 	} else if int(modified) != n {
@@ -272,16 +303,12 @@ func taskScrubResources(ctx context.Context, task *Task) error {
 	} else {
 		task.Infof("set %d resmon status to undef (no live instance) for %s", n, names)
 	}
-
-	// Create log table entries
 	logEntries := make([]cdb.LogEntry, n)
 	for i, resource := range resources {
-		d := make(map[string]any)
-		d["name"] = resource.String()
 		logEntries[i] = cdb.LogEntry{
 			Action: "resource.status",
 			Fmt:    "resource '%(name)s' status flagged 'undef'",
-			Dict:   d,
+			Dict:   map[string]any{"name": resource.String()},
 			User:   "scheduler",
 			Level:  "error",
 			SvcID:  &resource.OID,
@@ -292,12 +319,7 @@ func taskScrubResources(ctx context.Context, task *Task) error {
 		return err
 	}
 	odb.Session.SetChanges("log")
-
-	if err := odb.Session.NotifyChanges(ctx); err != nil {
-		return err
-	}
-
-	return odb.Commit()
+	return nil
 }
 
 func taskScrubObjects(ctx context.Context, task *Task) error {
@@ -316,20 +338,33 @@ func taskScrubObjects(ctx context.Context, task *Task) error {
 	if err != nil {
 		return err
 	}
-
-	n := len(objects)
-	if n == 0 {
+	if len(objects) == 0 {
 		return nil
 	}
 
-	// Historize `services` lines we will touch
-	for _, o := range objects {
-		if err := odb.ObjectUpdateLog(ctx, o.OID.String(), "undef"); err != nil {
-			return err
-		}
+	err = scrubByBatch(ctx, objects, scrubBatch, func(ctx context.Context, batch []cdb.ObjectMeta) error {
+		return scrubObjectsBatch(ctx, task, odb, batch)
+	})
+	if err != nil {
+		return err
 	}
+	if err := odb.Session.NotifyChanges(ctx); err != nil {
+		return err
+	}
+	return odb.Commit()
+}
 
-	// Update the `services` table
+// scrubObjectsBatch historizes the status change of the services, sets them
+// undef and logs it.
+func scrubObjectsBatch(ctx context.Context, task *Task, odb *cdb.DB, objects []cdb.ObjectMeta) error {
+	n := len(objects)
+	svcIDs := make([]string, n)
+	for i, o := range objects {
+		svcIDs[i] = o.OID.String()
+	}
+	if err := odb.ObjectsUpdateLog(ctx, svcIDs, "undef"); err != nil {
+		return err
+	}
 	if modified, err := odb.ObjectUpdateStatusSimple(ctx, objects, "undef", "undef"); err != nil {
 		return err
 	} else if int(modified) != n {
@@ -337,16 +372,12 @@ func taskScrubObjects(ctx context.Context, task *Task) error {
 	} else {
 		task.Infof("set %d services status to undef (no live instance) for %s", n, objects)
 	}
-
-	// Create log table entries
 	logEntries := make([]cdb.LogEntry, n)
 	for i, o := range objects {
-		d := make(map[string]any)
-		d["svc"] = o.String()
 		logEntries[i] = cdb.LogEntry{
 			Action: "service.status",
 			Fmt:    "service '%(svc)s' has zero live instance. Status flagged 'undef'",
-			Dict:   d,
+			Dict:   map[string]any{"svc": o.String()},
 			User:   "scheduler",
 			Level:  "error",
 			SvcID:  &o.OID,
@@ -356,12 +387,7 @@ func taskScrubObjects(ctx context.Context, task *Task) error {
 		return err
 	}
 	odb.Session.SetChanges("log")
-
-	if err := odb.Session.NotifyChanges(ctx); err != nil {
-		return err
-	}
-
-	return odb.Commit()
+	return nil
 }
 
 func taskScrubChecksLive(ctx context.Context, task *Task) error {

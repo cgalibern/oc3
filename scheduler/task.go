@@ -246,14 +246,15 @@ func (t *Task) Exec(ctx context.Context) (err error) {
 	status := taskExecStatusOk
 	begin := time.Now()
 
-	ctx, cancel := context.WithTimeout(ctx, t.timeout)
-	defer cancel()
-
 	// Execution
 	if t.fn != nil {
-		err = t.fn(ctx, t)
+		fnCtx, cancel := context.WithTimeout(ctx, t.timeout)
+		err = t.fn(fnCtx, t)
+		cancel()
 	}
 
+	// Each child runs under its own timeout, not the rest of the parent's: a
+	// child slow to the end of it would leave the next ones no time at all.
 	for _, child := range t.children {
 		child.db = t.db
 		child.ev = t.ev
