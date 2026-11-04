@@ -221,12 +221,14 @@ func taskScrubInstances(ctx context.Context, task *Task) error {
 	if err != nil {
 		return err
 	}
-	if instanceIDs != nil {
-		slog.Info(fmt.Sprintf("purge outdated %s", instanceIDs))
-	}
-	for _, instanceID := range instanceIDs {
-		odb.PurgeInstance(ctx, instanceID)
-	}
+	// The instances are purged by batches, a few statements each. As by
+	// instance before, a purge error is ignored; a done ctx stops the batches,
+	// whose purge would fail.
+	_ = scrubByBatch(ctx, instanceIDs, scrubBatch, func(ctx context.Context, batch []cdb.InstanceID) error {
+		slog.Info(fmt.Sprintf("purge outdated %s", batch))
+		_ = odb.PurgeInstances(ctx, batch)
+		return nil
+	})
 	if err := odb.Session.NotifyChanges(ctx); err != nil {
 		return err
 	}
