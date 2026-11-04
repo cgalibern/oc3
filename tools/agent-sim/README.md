@@ -57,7 +57,13 @@ lines of the action logs in their local time: run with the TZ of the collector
 The queue lengths can also come from the `/metrics` of the workers instead of
 redis, when the workers run with `worker.<name>.metrics.enable: true` and an
 `addr` reachable from the simulator: `--metrics http://host:8100,http://host:8101`
-(one URL per worker, each reporting the queues it consumes).
+(one URL per worker, each reporting the queues it consumes; the URL of the
+`/metrics` itself, as served by a reverse proxy, does as well).
+
+The default `--feeder` is the loopback of the collector, where an agent of
+the collector host finds it: from another host, or outside the network
+namespace of the collector, give the URL the agents use, `run` stops at once
+when nothing answers there.
 
 On the dev stack, redis listens on the loopback of the network namespace of
 the service, but the feeder and the workers listen on its backend address:

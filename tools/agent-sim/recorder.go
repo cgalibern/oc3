@@ -131,11 +131,21 @@ func (r *recorder) report(period time.Duration) {
 	r.window = map[string]*endpointStats{}
 	r.mu.Unlock()
 	var all []float64
-	count, errs := 0, 0
+	count, errs, lastErr := 0, 0, ""
 	for _, st := range window {
 		all = append(all, st.ms...)
 		count += st.Count
 		errs += st.Errors
+		if st.LastErr != "" {
+			lastErr = st.LastErr
+		}
+	}
+	if lastErr != "" {
+		detail := strings.NewReplacer("\n", " ").Replace(lastErr)
+		if len(detail) > 100 {
+			detail = detail[:100] + "..."
+		}
+		defer func() { _, _ = fmt.Fprintf(r.out, "        last error: %s\n", detail) }()
 	}
 	slices.Sort(all)
 	queued, detail := r.queueTotal()
@@ -211,7 +221,8 @@ func redisQueues(ctx context.Context, client *redis.Client) (map[string]int64, e
 
 // metricsQueues reads the oc3_feed_queue_length gauges exposed on /metrics by
 // the workers (worker.<name>.metrics.enable in the oc3 config), each worker
-// reporting the queues it consumes.
+// reporting the queues it consumes. A url is the /metrics itself or the base
+// it is served under.
 func metricsQueues(ctx context.Context, urls []string) (map[string]int64, error) {
 	lengths := map[string]int64{}
 	var errs []string
@@ -229,7 +240,11 @@ func metricsQueues(ctx context.Context, urls []string) (map[string]int64, error)
 var queueMetricRE = regexp.MustCompile(`^oc3_feed_queue_length\{queue="([^"]*)"\}\s+(\S+)`)
 
 func scrapeQueues(ctx context.Context, u string, lengths map[string]int64) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(u, "/")+"/metrics", nil)
+	u = strings.TrimRight(u, "/")
+	if !strings.HasSuffix(u, "/metrics") {
+		u += "/metrics"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return err
 	}

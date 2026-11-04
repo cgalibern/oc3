@@ -75,6 +75,25 @@ func newSim(spec fleetSpec, run runSpec, f *fleet, rec *recorder) *sim {
 	}
 }
 
+// probe checks the feeder answers at all, whatever its answer: an agent on
+// the collector host reaches it on the loopback, the default of --feeder, but
+// from another host or network namespace it has the address the agents use.
+func (s *sim) probe(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, s.run.Timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.run.FeederURL+"/api/version", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("feeder %s unreachable: %w (from outside the collector host or its network namespace, give --feeder the url the agents use)", s.run.FeederURL, err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	return nil
+}
+
 // do sends a request as node n, records it, and decodes the answer into out
 // when given.
 func (s *sim) do(ctx context.Context, n *node, method, endpoint string, body any, out any) (int, error) {

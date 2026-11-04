@@ -242,7 +242,7 @@ func cmdRun(args []string) error {
 	results := fs.String("results", "results", "directory of the run results: a sub-directory by run")
 	name := fs.String("name", "", "run name (default: the date)")
 	redisAddr := fs.String("redis", "", "redis address of the collector (host:port), to follow the length of the worker queues")
-	metricsURLs := fs.String("metrics", "", "comma-separated base URLs of the oc3 workers (http://host:port), to follow the length of the worker queues from their /metrics when redis is not reachable")
+	metricsURLs := fs.String("metrics", "", "comma-separated URLs of the /metrics of the oc3 workers (http://host:port or http://host/path/metrics), to follow the length of the worker queues when redis is not reachable")
 	reportEvery := fs.Duration("report-every", 30*time.Second, "report period")
 	_ = fs.Parse(args)
 	f, err := newFleet(*spec)
@@ -288,7 +288,11 @@ func cmdRun(args []string) error {
 			}
 		}
 	}()
-	newSim(*spec, *run, f, rec).Run(ctx)
+	s := newSim(*spec, *run, f, rec)
+	if err := s.probe(ctx); err != nil {
+		return err
+	}
+	s.Run(ctx)
 	cancel()
 	summary, err := rec.close(dir)
 	printSummary(os.Stdout, summary)
