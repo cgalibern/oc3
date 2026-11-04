@@ -57,7 +57,7 @@ const purgeServicesLogOrphansMinAge = time.Hour
 // deleteServicesByBatch deletes the services ids by batches of size with del,
 // and returns the count of services deleted. A batch failing is reported and
 // the next ones are deleted; none is started once ctx is done.
-func deleteServicesByBatch(ctx context.Context, ids []string, size int, del func(context.Context, []string) error) (int, error) {
+func deleteServicesByBatch(ctx context.Context, task *Task, ids []string, size int, del func(context.Context, []string) error) (int, error) {
 	var (
 		purged int
 		err    error
@@ -66,6 +66,7 @@ func deleteServicesByBatch(ctx context.Context, ids []string, size int, del func
 		if ctx.Err() != nil {
 			return purged, errors.Join(err, ctx.Err())
 		}
+		task.Infof("deleteServicesByBatch services %d", len(ids))
 		if err1 := del(ctx, batch); err1 != nil {
 			err = errors.Join(err, fmt.Errorf("purge services %v: %w", batch, err1))
 			continue
@@ -89,7 +90,8 @@ func taskPurgeServices(ctx context.Context, task *Task) error {
 	if err != nil {
 		return err
 	}
-	purged, err := deleteServicesByBatch(ctx, ids, purgeServicesDeleteBatch, odb.DeleteServicesCascade)
+	task.Infof("purgeable services %d", len(ids))
+	purged, err := deleteServicesByBatch(ctx, task, ids, purgeServicesDeleteBatch, odb.DeleteServicesCascade)
 	orphanTags, err1 := odb.PurgeOrphanServiceTags(ctx)
 	if err1 != nil {
 		err = errors.Join(err, err1)
