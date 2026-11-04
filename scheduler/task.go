@@ -68,6 +68,7 @@ var (
 		TaskMetrics,
 		TaskServicesAvailability,
 		TaskPurgeServices,
+		TaskPurgeNodes,
 	}
 
 	taskExecCounter = promauto.NewCounterVec(
@@ -325,9 +326,10 @@ func parseMaxAgeKey(key string) (time.Duration, error) {
 
 // maxAgeParsers are the parsers of the max_age settings not parsed by
 // parseMaxAgeKey, the task accepting other values, like 0 disabling the
-// purge_services age based purge, its default.
+// purge_services age based purge and the purge_nodes purge, their default.
 var maxAgeParsers = map[string]func() (time.Duration, error){
 	"scheduler.task.purge_services.max_age": purgeServicesMaxAge,
+	"scheduler.task.purge_nodes.max_age":    purgeNodesMaxAge,
 }
 
 // ValidateMaxAges verifies all the scheduler.task.<name>.max_age settings,

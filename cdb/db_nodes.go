@@ -793,34 +793,51 @@ func (oDb *DB) UpdateNodeFields(ctx context.Context, nodeID string, fields map[s
 	return nil
 }
 
+// nodeCascadeTables are the tables holding rows of a node, deleted with it.
+var nodeCascadeTables = []string{
+	"nodes",
+	"svcmon",
+	"dashboard",
+	"checks_live",
+	"packages",
+	"patches",
+	"node_tags",
+	"node_ip",
+	"node_hba",
+	"stor_zone",
+	"stor_array_proxy",
+	"auth_node",
+	"resmon_log",
+	"resmon_log_last",
+	"svcmon_log",
+	"svcmon_log_last",
+}
+
 // DeleteNodeCascade deletes a node and all its related data in other tables
 func (oDb *DB) DeleteNodeCascade(ctx context.Context, nodeID string) error {
-	defer logDuration("DeleteNodeCascade", time.Now())
-	if nodeID == "" {
-		return fmt.Errorf("DeleteNodeCascade: empty node_id")
+	return oDb.DeleteNodesCascade(ctx, []string{nodeID})
+}
+
+// DeleteNodesCascade deletes nodes and all their related data in other
+// tables, with a statement per table. The files of the nodes are left to the
+// caller, once the deletion committed (see util/nodefiles).
+func (oDb *DB) DeleteNodesCascade(ctx context.Context, nodeIDs []string) error {
+	defer logDuration("DeleteNodesCascade", time.Now())
+	if len(nodeIDs) == 0 {
+		return nil
 	}
-	tables := []string{
-		"nodes",
-		"svcmon",
-		"dashboard",
-		"checks_live",
-		"packages",
-		"patches",
-		"node_tags",
-		"node_ip",
-		"node_hba",
-		"stor_zone",
-		"stor_array_proxy",
-		"auth_node",
-		"resmon_log",
-		"resmon_log_last",
-		"svcmon_log",
-		"svcmon_log_last",
+	args := make([]any, len(nodeIDs))
+	for i, id := range nodeIDs {
+		if id == "" {
+			return fmt.Errorf("DeleteNodesCascade: empty node_id")
+		}
+		args[i] = id
 	}
-	for _, t := range tables {
-		query := "DELETE FROM " + t + " WHERE node_id = ?"
-		if _, err := oDb.ExecContext(ctx, query, nodeID); err != nil {
-			return fmt.Errorf("DeleteNodeCascade %s: %w", t, err)
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(nodeIDs)), ",")
+	for _, t := range nodeCascadeTables {
+		query := "DELETE FROM " + t + " WHERE node_id IN (" + placeholders + ")"
+		if _, err := oDb.ExecContext(ctx, query, args...); err != nil {
+			return fmt.Errorf("DeleteNodesCascade %s: %w", t, err)
 		}
 		oDb.SetChange(t)
 	}

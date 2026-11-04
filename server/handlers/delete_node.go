@@ -12,6 +12,7 @@ import (
 	"github.com/opensvc/oc3/cdb"
 	"github.com/opensvc/oc3/util/echolog"
 	"github.com/opensvc/oc3/util/logkey"
+	"github.com/opensvc/oc3/util/nodefiles"
 )
 
 // DeleteNode handles DELETE /nodes/{node_id}
@@ -69,7 +70,7 @@ func (a *Api) deleteNodeOne(c echo.Context, log *slog.Logger, ctx context.Contex
 	if !responsible {
 		return batchFail(http.StatusForbidden, "you are not responsible for node %s", node.Nodename)
 	}
-	tx, markSuccess, endTx, err := odb.BeginTxWithControl(ctx, log, &sql.TxOptions{})
+	tx, _, endTx, err := odb.BeginTxWithControl(ctx, log, &sql.TxOptions{})
 	if err != nil {
 		log.Error("cannot start transaction", logkey.Error, err)
 		return batchFail(http.StatusInternalServerError, "cannot delete node")
@@ -94,6 +95,22 @@ func (a *Api) deleteNodeOne(c echo.Context, log *slog.Logger, ctx context.Contex
 		log.Error("cannot write audit log", logkey.Error, logErr)
 		return batchFail(http.StatusInternalServerError, "cannot write audit log")
 	}
-	markSuccess()
+	// Committed here, not by endTx, to remove the files of the node only once
+	// its rows are gone: endTx then has nothing to roll back.
+	if err := tx.Commit(); err != nil {
+		log.Error("cannot commit node deletion", logkey.NodeID, node.NodeID, logkey.Error, err)
+		return batchFail(http.StatusInternalServerError, "cannot delete node %s", node.Nodename)
+	}
+	// The node is deleted: a file left behind is logged, not reported to the
+	// caller, and is removed again by a deletion of a node of the same id.
+	if err := nodeFilesDirs().Remove(node.NodeID); err != nil {
+		log.Warn("cannot remove the node files", logkey.NodeID, node.NodeID, logkey.Error, err)
+	}
 	return batchOK("delete node %s", node.Nodename)
+}
+
+// nodeFilesDirs are the directories of the files of the nodes the server
+// shares with the scheduler: the series of their metrics and their sysreport.
+func nodeFilesDirs() nodefiles.Dirs {
+	return nodefiles.Dirs{Stats: statsDirectory(), Sysreport: sysreportRepos().Dir}
 }
