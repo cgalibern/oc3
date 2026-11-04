@@ -371,10 +371,12 @@ func (oDb *DB) DeleteServicesCascade(ctx context.Context, svcIDs []string) error
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(svcIDs)), ",")
 	for _, t := range serviceCascadeTables {
+		now := time.Now()
 		query := "DELETE FROM " + t + " WHERE svc_id IN (" + placeholders + ")"
 		if _, err := oDb.ExecContext(ctx, query, args...); err != nil {
 			return fmt.Errorf("DeleteServicesCascade %s: %w", t, err)
 		}
+		logDuration("DeleteServicesCascade "+t, now)
 		oDb.SetChange(t)
 	}
 	return nil
