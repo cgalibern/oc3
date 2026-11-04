@@ -37,7 +37,7 @@ func (r *deleteRecorder) ExecContext(_ context.Context, query string, _ ...any) 
 func TestPurgeServicesLogOrphans(t *testing.T) {
 	rec := &deleteRecorder{counts: []int64{servicesLogPurgeBatch, 5, 0}}
 	// HasTx: the statements run on rec, not each in its own transaction of a pool.
-	odb := &DB{DB: rec, HasTx: true, Metrics: newMetrics(), Session: NewSession(rec, nil)}
+	odb := &DB{DB: rec, HasTx: true, Metrics: testMetrics(), Session: NewSession(rec, nil)}
 	total, err := odb.PurgeServicesLogOrphans(context.Background(), time.Hour)
 	if err != nil {
 		t.Fatal(err)

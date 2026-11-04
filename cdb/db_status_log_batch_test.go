@@ -100,9 +100,12 @@ func (r *stmtRecorder) ExecContext(_ context.Context, query string, _ ...any) (s
 // and the same metrics are counted.
 func TestResourcesLogStatementsKeepResLog(t *testing.T) {
 	rec := &stmtRecorder{}
-	m := newMetrics()
+	m := testMetrics()
 	odb := &DB{DB: rec, HasTx: true, Metrics: m, Session: NewSession(rec, nil)}
 	ctx := context.Background()
+	// The metrics are shared by the tests: their changes are checked.
+	change0, extend0 := counterValue(m.ObjectStatusLogChange), counterValue(m.ObjectStatusLogExtend)
+	res0 := counterValue(m.ResourceStatusLogChange) + counterValue(m.ResourceStatusLogExtend)
 	l := []*DBResmonLog{{SvcID: "s", NodeID: "n", RID: "fs#1", Status: "up", Log: "mounted"}}
 	if err := odb.resourcesLogSaveTransitions(ctx, l); err != nil {
 		t.Fatal(err)
@@ -121,13 +124,13 @@ func TestResourcesLogStatementsKeepResLog(t *testing.T) {
 			t.Errorf("res_log written by %q", q)
 		}
 	}
-	if got := counterValue(m.ObjectStatusLogChange); got != 1 {
+	if got := counterValue(m.ObjectStatusLogChange) - change0; got != 1 {
 		t.Errorf("ObjectStatusLogChange %v, want 1", got)
 	}
-	if got := counterValue(m.ObjectStatusLogExtend); got != 1 {
+	if got := counterValue(m.ObjectStatusLogExtend) - extend0; got != 1 {
 		t.Errorf("ObjectStatusLogExtend %v, want 1", got)
 	}
-	if got := counterValue(m.ResourceStatusLogChange) + counterValue(m.ResourceStatusLogExtend); got != 0 {
+	if got := counterValue(m.ResourceStatusLogChange) + counterValue(m.ResourceStatusLogExtend) - res0; got != 0 {
 		t.Errorf("ResourceStatusLog* counted %v, want 0 as ResourceUpdateLog", got)
 	}
 }
