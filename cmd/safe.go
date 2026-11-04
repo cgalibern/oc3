@@ -142,7 +142,7 @@ func safeEach(batch func(context.Context, *safe.Service, *cdb.DB) ([]*cdb.SafeFi
 	if err != nil {
 		return err
 	}
-	db, err := newDatabase()
+	db, err := newDatabase(sectionSafe)
 	if err != nil {
 		return err
 	}

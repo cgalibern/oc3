@@ -40,7 +40,7 @@ func newServer() (*server, error) {
 	if d := viper.GetDuration(sectionServer + ".db.max_statement_time"); d > 0 {
 		vars = map[string]string{"max_statement_time": strconv.FormatFloat(d.Seconds(), 'f', -1, 64)}
 	}
-	db, err := newDatabaseWith(vars)
+	db, err := newDatabaseWith(sectionServer, vars)
 	if err != nil {
 		return nil, err
 	}

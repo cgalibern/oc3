@@ -32,7 +32,7 @@ func newRunner() (*runnerT, error) {
 	if err := setup(sectionRunner); err != nil {
 		return nil, err
 	}
-	if db, err := newDatabase(); err != nil {
+	if db, err := newDatabase(sectionRunner); err != nil {
 		return nil, err
 	} else {
 		t := &runnerT{db: db, section: sectionRunner}
