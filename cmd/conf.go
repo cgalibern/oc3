@@ -179,6 +179,9 @@ func setDefaultRunnerConfig() {
 	viper.SetDefault(s+".command_timeout", 0)
 }
 
+// setDefaultDBConfig sets the defaults of the db settings, shared by the
+// sections. Each section may set its own, <section>.db.<name>, but the
+// password, see dbKey.
 func setDefaultDBConfig() {
 	viper.SetDefault("db.username", "opensvc")
 	viper.SetDefault("db.host", "127.0.0.1")
@@ -191,9 +194,9 @@ func setDefaultDBConfig() {
 	viper.SetDefault("db.schema.wait", "5m")
 	// connection pool of each subsystem: 0 means no limit for max_open_conns
 	// and conn_max_lifetime, no idle connection kept for max_idle_conns.
-	viper.SetDefault("db.max_open_conns", 10)
-	viper.SetDefault("db.max_idle_conns", 10)
-	viper.SetDefault("db.conn_max_lifetime", "3m")
+	viper.SetDefault("db.max_open_conns", 20)
+	viper.SetDefault("db.max_idle_conns", 20)
+	viper.SetDefault("db.conn_max_lifetime", "2h")
 }
 
 func setDefaultRedisConfig() {

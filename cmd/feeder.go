@@ -24,7 +24,7 @@ type (
 )
 
 func newFeeder() (*feeder, error) {
-	if db, err := newDatabase(); err != nil {
+	if db, err := newDatabase(sectionFeeder); err != nil {
 		return nil, err
 	} else {
 		return &feeder{db: db, section: sectionFeeder, redis: newRedis()}, nil

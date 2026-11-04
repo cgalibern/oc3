@@ -29,7 +29,7 @@ type (
 )
 
 func newWorker(section string, runners int, queues []string) (*workerT, error) {
-	db, err := newDatabase()
+	db, err := newDatabase(section)
 	if err != nil {
 		return nil, err
 	}

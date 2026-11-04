@@ -26,30 +26,54 @@ import (
 
 const sectionDB = "db"
 
-// openDatabase setup database handler. vars are session variables of its
-// connections, max_statement_time for instance.
-func openDatabase(vars map[string]string) (*sql.DB, error) {
+// dbKey returns the key of the db setting name for section: the first one set
+// of <section>.db.<name> and of its parent sections, worker.db.<name> for the
+// worker.slow section, else db.<name>, shared by the sections. The password is
+// only read from db.password.
+func dbKey(section, name string) string {
+	for s := section; s != "" && s != sectionDB; {
+		if k := s + ".db." + name; viper.IsSet(k) {
+			return k
+		}
+		i := strings.LastIndex(s, ".")
+		if i < 0 {
+			break
+		}
+		s = s[:i]
+	}
+	return "db." + name
+}
+
+// openDatabase setup database handler, with the db settings of section. vars
+// are session variables of its connections, max_statement_time for instance.
+func openDatabase(section string, vars map[string]string) (*sql.DB, error) {
 	cdb.InitMetrics()
 
 	cfg := mysql.Config{
-		User:                 viper.GetString("db.username"),
+		User:                 viper.GetString(dbKey(section, "username")),
 		Passwd:               viper.GetString("db.password"),
 		Net:                  "tcp",
-		Addr:                 viper.GetString("db.host") + ":" + viper.GetString("db.port"),
+		Addr:                 viper.GetString(dbKey(section, "host")) + ":" + viper.GetString(dbKey(section, "port")),
 		DBName:               "opensvc",
 		AllowNativePasswords: true,
 		ParseTime:            true,
 		Loc:                  time.Local,
 		Params:               vars,
 	}
-	slog.Info(fmt.Sprintf("db addr=%s", cfg.Addr))
+	var (
+		maxOpenConns    = viper.GetInt(dbKey(section, "max_open_conns"))
+		maxIdleConns    = viper.GetInt(dbKey(section, "max_idle_conns"))
+		connMaxLifetime = viper.GetDuration(dbKey(section, "conn_max_lifetime"))
+	)
+	slog.Info(fmt.Sprintf("db addr=%s user=%s max_open_conns=%d max_idle_conns=%d conn_max_lifetime=%s",
+		cfg.Addr, cfg.User, maxOpenConns, maxIdleConns, connMaxLifetime))
 	db, err := sql.Open("mysql", cfg.FormatDSN())
 	if err != nil {
 		return nil, err
 	}
-	db.SetConnMaxLifetime(viper.GetDuration("db.conn_max_lifetime"))
-	db.SetMaxOpenConns(viper.GetInt("db.max_open_conns"))
-	db.SetMaxIdleConns(viper.GetInt("db.max_idle_conns"))
+	db.SetConnMaxLifetime(connMaxLifetime)
+	db.SetMaxOpenConns(maxOpenConns)
+	db.SetMaxIdleConns(maxIdleConns)
 
 	// expose the connection pool usage as go_sql_*{db_name="opensvc"}
 	if err := prometheus.Register(collectors.NewDBStatsCollector(db, cfg.DBName)); err != nil {
@@ -58,19 +82,19 @@ func openDatabase(vars map[string]string) (*sql.DB, error) {
 	return db, nil
 }
 
-// newDatabase opens the database once its schema is the one this oc3 needs,
-// see checkSchema.
-func newDatabase() (*sql.DB, error) {
-	return newDatabaseWith(nil)
+// newDatabase opens the database with the db settings of section once its
+// schema is the one this oc3 needs, see checkSchema.
+func newDatabase(section string) (*sql.DB, error) {
+	return newDatabaseWith(section, nil)
 }
 
 // newDatabaseWith is newDatabase, its connections with the session variables vars.
-func newDatabaseWith(vars map[string]string) (*sql.DB, error) {
-	db, err := openDatabase(vars)
+func newDatabaseWith(section string, vars map[string]string) (*sql.DB, error) {
+	db, err := openDatabase(section, vars)
 	if err != nil {
 		return nil, err
 	}
-	if err := checkSchema(db); err != nil {
+	if err := checkSchema(db, section); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -83,16 +107,17 @@ const schemaRetryInterval = 10 * time.Second
 
 // checkSchema compares the migrations the database records with the ones of this
 // oc3. With db.schema.check "enforce", the default, it waits up to db.schema.wait
-// for the database to answer and for oc3 db migrate, started at the same time,
+// (or <section>.db.schema.check and <section>.db.schema.wait, see dbKey) for the database to answer and for oc3 db migrate, started at the same time,
 // to apply the migrations left, then fails rather than run on a schema it does
 // not know. An applied migration changed since fails at once: waiting cannot fix
 // it. With "warn", it logs what is wrong and goes on.
-func checkSchema(db *sql.DB) error {
-	mode := viper.GetString("db.schema.check")
+func checkSchema(db *sql.DB, section string) error {
+	checkKey := dbKey(section, "schema.check")
+	mode := viper.GetString(checkKey)
 	if mode != "enforce" && mode != "warn" {
-		return fmt.Errorf("db.schema.check: %q is neither enforce nor warn", mode)
+		return fmt.Errorf("%s: %q is neither enforce nor warn", checkKey, mode)
 	}
-	deadline := time.Now().Add(viper.GetDuration("db.schema.wait"))
+	deadline := time.Now().Add(viper.GetDuration(dbKey(section, "schema.wait")))
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), schemaRetryInterval)
 		st, err := migrate.Check(ctx, db)
@@ -108,7 +133,7 @@ func checkSchema(db *sql.DB) error {
 			slog.Info(fmt.Sprintf("database schema: %d migrations applied", len(st.Items)))
 			return nil
 		case mode == "warn":
-			slog.Warn("database schema: going on, as db.schema.check is warn", logkey.Error, err)
+			slog.Warn("database schema: going on, as "+checkKey+" is warn", logkey.Error, err)
 			return nil
 		case errors.Is(err, migrate.ErrModified) || !transient(err) || time.Now().After(deadline):
 			return fmt.Errorf("database schema: %w", err)
@@ -160,7 +185,7 @@ func cmdDBStatus() *cobra.Command {
 			if err := setup(sectionDB); err != nil {
 				return err
 			}
-			db, err := openDatabase(nil)
+			db, err := openDatabase(sectionDB, nil)
 			if err != nil {
 				return err
 			}
@@ -214,7 +239,7 @@ same way as a new one. Back the database up before.`,
 			if err := setup(sectionDB); err != nil {
 				return err
 			}
-			db, err := openDatabase(nil)
+			db, err := openDatabase(sectionDB, nil)
 			if err != nil {
 				return err
 			}

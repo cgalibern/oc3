@@ -4,9 +4,18 @@
 ```yaml
 db:
   password: xxxxxxx
-  log:
-    level: info
-    slow_query_threshold: 500ms
+  # The connection settings below are shared by the sections. A section may
+  # set its own under <section>.db, the password excepted: worker.slow.db,
+  # then worker.db, then db for the worker.slow section.
+  username: opensvc
+  host: 127.0.0.1
+  port: 3306
+  # The connection pool of each process.
+  # 0: no limit for max_open_conns and conn_max_lifetime, no idle connection
+  # kept for max_idle_conns.
+  max_open_conns: 10
+  max_idle_conns: 10
+  conn_max_lifetime: 3m
 
 feeder:
   addr: 127.0.0.1:8080
@@ -36,6 +45,9 @@ server:
     enable: true
 
 scheduler:
+  db:
+    max_open_conns: 4
+    conn_max_lifetime: 1m
   task:
     purge_services:
       # Delete, with their history, the services that no instance reports
