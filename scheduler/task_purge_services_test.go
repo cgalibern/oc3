@@ -75,7 +75,7 @@ func TestDeleteServicesByBatch(t *testing.T) {
 		}
 		return nil
 	}
-	purged, err := deleteServicesByBatch(context.Background(), ids, 2, del)
+	purged, err := deleteServicesByBatch(context.Background(), &Task{}, ids, 2, del)
 	if want := [][]string{{"a", "b"}, {"c", "d"}, {"e"}}; !slices.EqualFunc(batches, want, slices.Equal[[]string]) {
 		t.Errorf("batches %v, want %v", batches, want)
 	}
@@ -89,7 +89,7 @@ func TestDeleteServicesByBatch(t *testing.T) {
 	batches = nil
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	purged, err = deleteServicesByBatch(ctx, ids, 2, del)
+	purged, err = deleteServicesByBatch(ctx, &Task{}, ids, 2, del)
 	if len(batches) != 0 || purged != 0 || !errors.Is(err, context.Canceled) {
 		t.Errorf("done context: batches %v, purged %d, err %v", batches, purged, err)
 	}

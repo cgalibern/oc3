@@ -10,27 +10,42 @@ import (
 	"github.com/spf13/viper"
 )
 
-// TaskPurgeServices deletes, with all their related data, the services that
-// no instance reports anymore and that are either tagged @purge or, when
-// scheduler.task.purge_services.max_age is set, whose status is older than
-// that age. It also drops the svc_tags rows left behind by deleted services.
-//
-// The age based purge is disabled by default (max_age 0): production
-// collectors usually keep the services that left their cluster until an
-// operator deletes them. Set a short max_age on collectors fed by short
-// lived clusters, such as test labs, to keep the services, dashboard and
-// history tables small.
-//
-// Each run handles at most scheduler.task.purge_services.batch_size
-// services, so a large backlog is drained over several runs without
-// holding the database for too long.
-var TaskPurgeServices = Task{
-	name:    "purge_services",
-	desc:    "delete the services without instance that are tagged @purge or whose status is older than scheduler.task.purge_services.max_age (default 0: disabled)",
-	period:  time.Hour,
-	fn:      taskPurgeServices,
-	timeout: time.Hour,
-}
+const (
+	// purgeServicesDeleteBatch is the count of services deleted together, by a
+	// statement per table: each statement commits alone, so a service at a time
+	// cost a commit per table and service, too slow to purge the candidates within
+	// the period. A bigger batch would make long deletions on the large tables.
+	purgeServicesDeleteBatch = 100
+
+	// purgeServicesLogOrphansMinAge is the age of the end of the status log of a
+	// service gone, after which the log is purged: a service being created may
+	// have its log written before its services row.
+	purgeServicesLogOrphansMinAge = time.Hour
+)
+
+var (
+	// TaskPurgeServices deletes, with all their related data, the services that
+	// no instance reports anymore and that are either tagged @purge or, when
+	// scheduler.task.purge_services.max_age is set, whose status is older than
+	// that age. It also drops the svc_tags rows left behind by deleted services.
+	//
+	// The age based purge is disabled by default (max_age 0): production
+	// collectors usually keep the services that left their cluster until an
+	// operator deletes them. Set a short max_age on collectors fed by short
+	// lived clusters, such as test labs, to keep the services, dashboard and
+	// history tables small.
+	//
+	// Each run handles at most scheduler.task.purge_services.batch_size
+	// services, so a large backlog is drained over several runs without
+	// holding the database for too long.
+	TaskPurgeServices = Task{
+		name:    "purge_services",
+		desc:    "delete the services without instance that are tagged @purge or whose status is older than scheduler.task.purge_services.max_age (default 0: disabled)",
+		period:  time.Hour,
+		fn:      taskPurgeServices,
+		timeout: time.Hour,
+	}
+)
 
 // purgeServicesMaxAge returns the configured max_age, 0 meaning the age
 // based purge is disabled.
@@ -42,17 +57,6 @@ func purgeServicesMaxAge() (time.Duration, error) {
 	}
 	return parseMaxAgeKey(key)
 }
-
-// purgeServicesDeleteBatch is the count of services deleted together, by a
-// statement per table: each statement commits alone, so a service at a time
-// cost a commit per table and service, too slow to purge the candidates within
-// the period. A bigger batch would make long deletions on the large tables.
-const purgeServicesDeleteBatch = 100
-
-// purgeServicesLogOrphansMinAge is the age of the end of the status log of a
-// service gone, after which the log is purged: a service being created may
-// have its log written before its services row.
-const purgeServicesLogOrphansMinAge = time.Hour
 
 // deleteServicesByBatch deletes the services ids by batches of size with del,
 // and returns the count of services deleted. A batch failing is reported and
