@@ -630,16 +630,20 @@ func (oDb *DB) GetOrphanInstances(ctx context.Context, nodeIDs, objectNames []st
 	return
 }
 
+// instanceTables are the tables holding rows of an instance, which its purge
+// empties of them.
+var instanceTables = []string{
+	"svcmon", "dashboard", "dashboard_events", "svcdisks", "resmon",
+	"checks_live", "comp_status", "action_queue", "resinfo", "saves",
+}
+
 func (oDb *DB) PurgeInstance(ctx context.Context, id InstanceID) error {
 	const (
 		where = "WHERE `svc_id` = ? and `node_id` = ?"
 	)
 
 	var (
-		tables = []string{
-			"svcmon", "dashboard", "dashboard_events", "svcdisks", "resmon",
-			"checks_live", "comp_status", "action_queue", "resinfo", "saves",
-		}
+		tables = instanceTables
 
 		err error
 	)
@@ -651,6 +655,33 @@ func (oDb *DB) PurgeInstance(ctx context.Context, id InstanceID) error {
 			continue
 		} else if count > 0 {
 			slog.Debug(fmt.Sprintf("purged %s from table %s", id, tableName))
+			oDb.SetChange(tableName)
+		}
+	}
+	return err
+}
+
+// PurgeInstances deletes, as PurgeInstance does for one, the rows of the
+// instances ids from the instance tables, by a statement per table for all of
+// them: statements by instance, each committed alone, could not keep up with
+// thousands of outdated instances. A table failing is reported, and the next
+// ones still purged.
+func (oDb *DB) PurgeInstances(ctx context.Context, ids []InstanceID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	defer logDuration(fmt.Sprintf("PurgeInstances %d", len(ids)), time.Now())
+	where := " WHERE (`svc_id`, `node_id`) IN (" + strings.Repeat("(?,?),", len(ids)-1) + "(?,?))"
+	args := make([]any, 0, 2*len(ids))
+	for _, id := range ids {
+		args = append(args, id.svcID, id.nodeID)
+	}
+	var err error
+	for _, tableName := range instanceTables {
+		if count, err1 := oDb.execCountContext(ctx, "DELETE FROM "+tableName+where, args...); err1 != nil {
+			err = errors.Join(err, fmt.Errorf("delete from %s: %w", tableName, err1))
+			continue
+		} else if count > 0 {
 			oDb.SetChange(tableName)
 		}
 	}
