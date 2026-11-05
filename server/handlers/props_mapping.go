@@ -818,6 +818,7 @@ var propsMapping = map[string]propMapping{
 			"email_log_level", "im_log_level", "email_notifications_delay",
 			"im_notifications_delay", "lock_filter", "registration_id",
 			"quota_app", "quota_org_group", "quota_docker_registries",
+			"oidc_linked",
 		},
 		Props: map[string]propDef{
 			"id":                        col(schema.AuthUserID),
@@ -839,6 +840,12 @@ var propsMapping = map[string]propMapping{
 			"quota_app":                 colStr(schema.AuthUserQuotaApp),
 			"quota_org_group":           colStr(schema.AuthUserQuotaOrgGroup),
 			"quota_docker_registries":   colStr(schema.AuthUserQuotaDockerRegistries),
+			// An OpenID Connect identity is linked to the account: its password is
+			// the provider's, which POST /users/{user_id}/password refuses to set.
+			"oidc_linked": {
+				SQLExpr: "EXISTS(SELECT 1 FROM auth_user_identities i WHERE i.user_id = auth_user.id)",
+				Kind:    "bool",
+			},
 		},
 	},
 	// The orchestrations as listed (GET /orchestrations): the columns of the derived

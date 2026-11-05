@@ -144,3 +144,12 @@ func (oDb *DB) UserRoles(ctx context.Context, userID int64) ([]string, error) {
 	}
 	return roles, rows.Err()
 }
+
+// UserHasIdentity tells whether an OpenID Connect identity is linked to the
+// user: their password is then the provider's.
+func (oDb *DB) UserHasIdentity(ctx context.Context, userID int64) (bool, error) {
+	var linked bool
+	err := oDb.DB.QueryRowContext(ctx,
+		"SELECT EXISTS(SELECT 1 FROM auth_user_identities WHERE user_id = ?)", userID).Scan(&linked)
+	return linked, err
+}

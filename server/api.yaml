@@ -14345,6 +14345,69 @@ paths:
         - basicAuth: [ ]
         - bearerAuth: [ ]
 
+  /users/{user_id}/password:
+    post:
+      operationId: PostUserPassword
+      description: |
+        Set the password of another user, without the current one, as an
+        administrator resets it. Requires the UserManager privilege (or Manager);
+        the password of a Manager is set by a Manager only. One's own password is
+        changed by POST /users/self/password, which asks for the current one (409
+        here). Refused with 403 while impersonating, and when password sign-in is
+        disabled (server.auth.basic_users false): the password would sign nobody
+        in. Refused with 409 for an account linked to an OpenID Connect identity
+        (oidc_linked): its password, second factor and deactivation are the
+        identity provider's. The new password must be at least 12 characters long;
+        it is stored as a web2py hash, accepted by both collectors. The change is
+        logged, without the password.
+      parameters:
+        - in: path
+          name: user_id
+          required: true
+          description: |
+            User identifier: auth_user.id, or the user email when it contains an "@".
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_password]
+              properties:
+                new_password:
+                  type: string
+                  minLength: 12
+                  description: At least 12 characters.
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  info:
+                    type: string
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        409:
+          $ref: '#/components/responses/409'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
   /users/{user_id}:
     get:
       operationId: GetUser
@@ -27006,6 +27069,11 @@ components:
           type: string
         quota_docker_registries:
           type: string
+        oidc_linked:
+          type: boolean
+          description: |
+            An OpenID Connect identity is linked to the account: its password is
+            the identity provider's (POST /users/{user_id}/password refuses it).
 
     UserPrefsResponse:
       type: object
