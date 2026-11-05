@@ -15,7 +15,7 @@ import (
 )
 
 type (
-	// compAgentCaller is the node calling a /compliance/agent route, and the
+	// compAgentCaller is the node calling a /agent/compliance route, and the
 	// object of this node the call is about, if any.
 	compAgentCaller struct {
 		nodeID string
@@ -149,9 +149,9 @@ func (a *Api) compAgent(c echo.Context, log *slog.Logger, ctx context.Context, p
 	return caller, nil
 }
 
-// GetComplianceAgentData handles GET /compliance/agent/data
-func (a *Api) GetComplianceAgentData(c echo.Context, params server.GetComplianceAgentDataParams) error {
-	log := echolog.GetLogHandler(c, "GetComplianceAgentData")
+// GetAgentComplianceData handles GET /agent/compliance/data
+func (a *Api) GetAgentComplianceData(c echo.Context, params server.GetAgentComplianceDataParams) error {
+	log := echolog.GetLogHandler(c, "GetAgentComplianceData")
 	ctx := c.Request().Context()
 	caller, err := a.compAgent(c, log, ctx, params.Path)
 	if err != nil {
@@ -175,9 +175,9 @@ func compAgentPattern(p *string) string {
 	return *p
 }
 
-// GetComplianceAgentModulesets handles GET /compliance/agent/modulesets
-func (a *Api) GetComplianceAgentModulesets(c echo.Context, params server.GetComplianceAgentModulesetsParams) error {
-	log := echolog.GetLogHandler(c, "GetComplianceAgentModulesets")
+// GetAgentComplianceModulesets handles GET /agent/compliance/modulesets
+func (a *Api) GetAgentComplianceModulesets(c echo.Context, params server.GetAgentComplianceModulesetsParams) error {
+	log := echolog.GetLogHandler(c, "GetAgentComplianceModulesets")
 	ctx := c.Request().Context()
 	caller, err := a.compAgent(c, log, ctx, nil)
 	if err != nil {
@@ -190,9 +190,9 @@ func (a *Api) GetComplianceAgentModulesets(c echo.Context, params server.GetComp
 	return c.JSON(http.StatusOK, l)
 }
 
-// GetComplianceAgentRulesets handles GET /compliance/agent/rulesets
-func (a *Api) GetComplianceAgentRulesets(c echo.Context, params server.GetComplianceAgentRulesetsParams) error {
-	log := echolog.GetLogHandler(c, "GetComplianceAgentRulesets")
+// GetAgentComplianceRulesets handles GET /agent/compliance/rulesets
+func (a *Api) GetAgentComplianceRulesets(c echo.Context, params server.GetAgentComplianceRulesetsParams) error {
+	log := echolog.GetLogHandler(c, "GetAgentComplianceRulesets")
 	ctx := c.Request().Context()
 	caller, err := a.compAgent(c, log, ctx, nil)
 	if err != nil {
@@ -205,23 +205,23 @@ func (a *Api) GetComplianceAgentRulesets(c echo.Context, params server.GetCompli
 	return c.JSON(http.StatusOK, l)
 }
 
-// PostComplianceAgentModuleset handles POST /compliance/agent/modulesets/{name}
-func (a *Api) PostComplianceAgentModuleset(c echo.Context, name string, params server.PostComplianceAgentModulesetParams) error {
+// PostAgentComplianceModuleset handles POST /agent/compliance/modulesets/{name}
+func (a *Api) PostAgentComplianceModuleset(c echo.Context, name string, params server.PostAgentComplianceModulesetParams) error {
 	return a.compAgentAttach(c, a.compAgentModuleset(), name, params.Path)
 }
 
-// DeleteComplianceAgentModuleset handles DELETE /compliance/agent/modulesets/{name}
-func (a *Api) DeleteComplianceAgentModuleset(c echo.Context, name string, params server.DeleteComplianceAgentModulesetParams) error {
+// DeleteAgentComplianceModuleset handles DELETE /agent/compliance/modulesets/{name}
+func (a *Api) DeleteAgentComplianceModuleset(c echo.Context, name string, params server.DeleteAgentComplianceModulesetParams) error {
 	return a.compAgentDetach(c, a.compAgentModuleset(), name, params.Path)
 }
 
-// PostComplianceAgentRuleset handles POST /compliance/agent/rulesets/{name}
-func (a *Api) PostComplianceAgentRuleset(c echo.Context, name string, params server.PostComplianceAgentRulesetParams) error {
+// PostAgentComplianceRuleset handles POST /agent/compliance/rulesets/{name}
+func (a *Api) PostAgentComplianceRuleset(c echo.Context, name string, params server.PostAgentComplianceRulesetParams) error {
 	return a.compAgentAttach(c, a.compAgentRuleset(), name, params.Path)
 }
 
-// DeleteComplianceAgentRuleset handles DELETE /compliance/agent/rulesets/{name}
-func (a *Api) DeleteComplianceAgentRuleset(c echo.Context, name string, params server.DeleteComplianceAgentRulesetParams) error {
+// DeleteAgentComplianceRuleset handles DELETE /agent/compliance/rulesets/{name}
+func (a *Api) DeleteAgentComplianceRuleset(c echo.Context, name string, params server.DeleteAgentComplianceRulesetParams) error {
 	return a.compAgentDetach(c, a.compAgentRuleset(), name, params.Path)
 }
 
@@ -315,15 +315,15 @@ func (a *Api) compAgentDetach(c echo.Context, k compAgentAttachment, name string
 	return c.JSON(http.StatusOK, map[string]string{"info": fmt.Sprintf("%d %s detached", len(ids), k.kind)})
 }
 
-// PostComplianceAgentLogs handles POST /compliance/agent/logs
-func (a *Api) PostComplianceAgentLogs(c echo.Context, params server.PostComplianceAgentLogsParams) error {
-	log := echolog.GetLogHandler(c, "PostComplianceAgentLogs")
+// PostAgentComplianceLogs handles POST /agent/compliance/logs
+func (a *Api) PostAgentComplianceLogs(c echo.Context, params server.PostAgentComplianceLogsParams) error {
+	log := echolog.GetLogHandler(c, "PostAgentComplianceLogs")
 	ctx := c.Request().Context()
 	caller, err := a.compAgent(c, log, ctx, params.Path)
 	if err != nil {
 		return httpProblem(c, err)
 	}
-	var body server.PostComplianceAgentLogsJSONRequestBody
+	var body server.PostAgentComplianceLogsJSONRequestBody
 	if err := c.Bind(&body); err != nil {
 		return httpProblem(c, httpErrorf(http.StatusBadRequest, "invalid request body: %s", err))
 	}

@@ -63,6 +63,13 @@ func (a *Api) attachTagNode(c echo.Context, log *slog.Logger, ctx context.Contex
 		log.Info("user is not responsible for this node", logkey.NodeID, nodeId)
 		return JSONProblemf(c, http.StatusForbidden, "user is not responsible for node %s", nodeId)
 	}
+	return a.attachTagNodeChecked(c, log, ctx, tag, nodeId, tagAttachData)
+}
+
+// attachTagNodeChecked attaches tag to the node, or updates the attach data,
+// the caller allowed to: a user responsible for the node, or the node itself.
+func (a *Api) attachTagNodeChecked(c echo.Context, log *slog.Logger, ctx context.Context, tag *cdb.Tag, nodeId string, tagAttachData *string) error {
+	odb := a.ODB
 
 	current, err := odb.GetNodeTagAttachment(ctx, nodeId, tag.TagID)
 	if err != nil {
@@ -130,6 +137,12 @@ func (a *Api) detachTagNode(c echo.Context, log *slog.Logger, ctx context.Contex
 		log.Info("user is not responsible for this node", logkey.NodeID, nodeId)
 		return JSONProblemf(c, http.StatusForbidden, "user is not responsible for node %s", nodeId)
 	}
+	return a.detachTagNodeChecked(c, log, ctx, tag, nodeId)
+}
+
+// detachTagNodeChecked detaches tag from the node, the caller allowed to.
+func (a *Api) detachTagNodeChecked(c echo.Context, log *slog.Logger, ctx context.Context, tag *cdb.Tag, nodeId string) error {
+	odb := a.ODB
 
 	n, err := odb.DetachNodeTag(ctx, nodeId, tag.TagID)
 	if err != nil {
@@ -165,6 +178,14 @@ func (a *Api) attachTagService(c echo.Context, log *slog.Logger, ctx context.Con
 		log.Info("user is not responsible for this service", "svc_id", svc)
 		return JSONProblemf(c, http.StatusForbidden, "user is not responsible for service %s", svc)
 	}
+	return a.attachTagServiceChecked(c, log, ctx, tag, svc, tagAttachData)
+}
+
+// attachTagServiceChecked attaches tag to the service of id svc, or updates
+// the attach data, the caller allowed to: a user responsible for the service,
+// or a node of its cluster.
+func (a *Api) attachTagServiceChecked(c echo.Context, log *slog.Logger, ctx context.Context, tag *cdb.Tag, svc string, tagAttachData *string) error {
+	odb := a.ODB
 
 	current, err := odb.GetServiceTagAttachment(ctx, svc, tag.TagID)
 	if err != nil {
@@ -238,6 +259,13 @@ func (a *Api) detachTagService(c echo.Context, log *slog.Logger, ctx context.Con
 		log.Info("user is not responsible for this service", "svc_id", svc)
 		return JSONProblemf(c, http.StatusForbidden, "user is not responsible for service %s", svc)
 	}
+	return a.detachTagServiceChecked(c, log, ctx, tag, svc)
+}
+
+// detachTagServiceChecked detaches tag from the service of id svc, the
+// caller allowed to.
+func (a *Api) detachTagServiceChecked(c echo.Context, log *slog.Logger, ctx context.Context, tag *cdb.Tag, svc string) error {
+	odb := a.ODB
 
 	n, err := odb.DetachServiceTag(ctx, svc, tag.TagID)
 	if err != nil {
