@@ -92,6 +92,8 @@ func (t *server) apiRegister(e *echo.Echo) {
 	} else {
 		odb.CreateSession(nil)
 	}
+	// The /agent routes are the nodes' own: no user may call them.
+	e.Use(handlers.AgentMiddleware(pathApi + "/agent"))
 	api.RegisterHandlersWithBaseURL(e, handler, pathApi)
 	// The orchestration runs are advanced by the api server, for as long as it
 	// runs: a named lock lets one server do it when there are several.

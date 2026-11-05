@@ -167,3 +167,18 @@ func IsAuthByAnonRegister(c echo.Context) bool {
 	authMode, ok := c.Get(XAuthMode).(string)
 	return ok && authMode == AuthModeAnonRegister
 }
+
+// AgentMiddleware refuses the routes under prefix to the callers other than a
+// node: they act on the node authenticated, and on nothing else. Each handler
+// checks it too. The route matched decides, not the request path, so that no
+// spelling of the path escapes the check.
+func AgentMiddleware(prefix string) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			if p := c.Path(); (p == prefix || strings.HasPrefix(p, prefix+"/")) && !IsAuthByNode(c) {
+				return JSONProblem(c, http.StatusForbidden, "node authentication required")
+			}
+			return next(c)
+		}
+	}
+}
