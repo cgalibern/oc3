@@ -6297,12 +6297,16 @@ type UserRow struct {
 	ImUsername              *string `json:"im_username,omitempty"`
 	LastName                *string `json:"last_name,omitempty"`
 	LockFilter              *string `json:"lock_filter,omitempty"`
-	PhoneWork               *string `json:"phone_work,omitempty"`
-	QuotaApp                *string `json:"quota_app,omitempty"`
-	QuotaDockerRegistries   *string `json:"quota_docker_registries,omitempty"`
-	QuotaOrgGroup           *string `json:"quota_org_group,omitempty"`
-	RegistrationId          *string `json:"registration_id,omitempty"`
-	Username                *string `json:"username,omitempty"`
+
+	// OidcLinked An OpenID Connect identity is linked to the account: its password is
+	// the identity provider's (POST /users/{user_id}/password refuses it).
+	OidcLinked            *bool   `json:"oidc_linked,omitempty"`
+	PhoneWork             *string `json:"phone_work,omitempty"`
+	QuotaApp              *string `json:"quota_app,omitempty"`
+	QuotaDockerRegistries *string `json:"quota_docker_registries,omitempty"`
+	QuotaOrgGroup         *string `json:"quota_org_group,omitempty"`
+	RegistrationId        *string `json:"registration_id,omitempty"`
+	Username              *string `json:"username,omitempty"`
 }
 
 // Whoami defines model for Whoami.
@@ -15559,6 +15563,12 @@ type GetUserNodesParams struct {
 	Groupby *InQueryGroupby `form:"groupby,omitempty" json:"groupby,omitempty"`
 }
 
+// PostUserPasswordJSONBody defines parameters for PostUserPassword.
+type PostUserPasswordJSONBody struct {
+	// NewPassword At least 12 characters.
+	NewPassword string `json:"new_password"`
+}
+
 // PostUserPrefsJSONBody defines parameters for PostUserPrefs.
 type PostUserPrefsJSONBody struct {
 	// Data The preferences object, stored verbatim.
@@ -16223,6 +16233,9 @@ type PostUserSelfPasswordJSONRequestBody PostUserSelfPasswordJSONBody
 
 // PostUserJSONRequestBody defines body for PostUser for application/json ContentType.
 type PostUserJSONRequestBody PostUserJSONBody
+
+// PostUserPasswordJSONRequestBody defines body for PostUserPassword for application/json ContentType.
+type PostUserPasswordJSONRequestBody PostUserPasswordJSONBody
 
 // PostUserPrefsJSONRequestBody defines body for PostUserPrefs for application/json ContentType.
 type PostUserPrefsJSONRequestBody PostUserPrefsJSONBody

@@ -97,8 +97,9 @@ paths:
           for compliance_check and compliance_fix) and responsibility for the node.
         - cluster_id alone: an action on the whole cluster, posted for a node of the
           cluster seen alive in the last 15 minutes and running the om3 agent,
-          which runs it on every node of the cluster (`om node <action> --node *`).
-          Requires the NodeExec privilege and responsibility for every node of the
+          which runs it on every node of the cluster (`om node <action> --node *`),
+          or, for updatepkg, upgrades the opensvc packages of every node, one node
+          at a time (`om cluster update pkg`, an agent recent enough). Requires the NodeExec privilege and responsibility for every node of the
           cluster.
 
         Accepted actions: push resinfo, push config, start, stop, giveback,
@@ -110,8 +111,8 @@ paths:
         checks, sysreport, updatecomp, updatepkg, scanscsi,
         reboot, schedule_reboot, unschedule_reboot, shutdown, drain,
         compliance_check, compliance_fix (on every module attached to the node),
-        freeze and thaw on a node; freeze, thaw and abort (of the running
-        orchestration) on a cluster. Compliance actions on a given module, moduleset
+        freeze and thaw on a node; freeze, thaw, abort (of the running
+        orchestration) and updatepkg on a cluster. Compliance actions on a given module, moduleset
         or ruleset, Wake On LAN, the root password rotation and agent options are
         not supported.
 
@@ -14344,6 +14345,69 @@ paths:
         - basicAuth: [ ]
         - bearerAuth: [ ]
 
+  /users/{user_id}/password:
+    post:
+      operationId: PostUserPassword
+      description: |
+        Set the password of another user, without the current one, as an
+        administrator resets it. Requires the UserManager privilege (or Manager);
+        the password of a Manager is set by a Manager only. One's own password is
+        changed by POST /users/self/password, which asks for the current one (409
+        here). Refused with 403 while impersonating, and when password sign-in is
+        disabled (server.auth.basic_users false): the password would sign nobody
+        in. Refused with 409 for an account linked to an OpenID Connect identity
+        (oidc_linked): its password, second factor and deactivation are the
+        identity provider's. The new password must be at least 12 characters long;
+        it is stored as a web2py hash, accepted by both collectors. The change is
+        logged, without the password.
+      parameters:
+        - in: path
+          name: user_id
+          required: true
+          description: |
+            User identifier: auth_user.id, or the user email when it contains an "@".
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_password]
+              properties:
+                new_password:
+                  type: string
+                  minLength: 12
+                  description: At least 12 characters.
+      tags:
+        - collector
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  info:
+                    type: string
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        409:
+          $ref: '#/components/responses/409'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+
   /users/{user_id}:
     get:
       operationId: GetUser
@@ -27005,6 +27069,11 @@ components:
           type: string
         quota_docker_registries:
           type: string
+        oidc_linked:
+          type: boolean
+          description: |
+            An OpenID Connect identity is linked to the account: its password is
+            the identity provider's (POST /users/{user_id}/password refuses it).
 
     UserPrefsResponse:
       type: object

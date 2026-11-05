@@ -28,6 +28,10 @@ oc3_feed_jobs_running 3
 	if lengths["feed_daemon_ping"] != 12 || lengths["feed_daemon_status"] != 0 || len(lengths) != 2 {
 		t.Fatalf("unexpected lengths: %v", lengths)
 	}
+	lengths, err = metricsQueues(context.Background(), []string{srv.URL + "/metrics"})
+	if err != nil || lengths["feed_daemon_ping"] != 12 {
+		t.Fatalf("the url of the /metrics itself: %v %v", lengths, err)
+	}
 	if _, err := metricsQueues(context.Background(), []string{"http://127.0.0.1:1"}); err == nil {
 		t.Fatal("expected an error when no worker answers")
 	}

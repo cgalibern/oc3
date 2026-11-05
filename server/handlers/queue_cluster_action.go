@@ -14,22 +14,32 @@ import (
 // clusterActionWords are the actions accepted on a whole cluster, and the om3
 // agent command each queues. om3 has three cluster-wide actions, `om cluster
 // freeze`, `unfreeze` (alias thaw) and `abort` (core/om/kind_ccfg.go), but its
-// collector queue runner prefixes every command of a node action with `node`
+// collector queue runner prefixes the command of a node action with `node`
 // (core/object/node_deueue.go). The same actions are reached there as node
 // actions on every node of the cluster, selected by `--node *`, which the agent
-// expands itself (core/nodeselector, no shell involved). The other cluster
-// commands of om3 — join, leave, enroll, evict, register, ssh trust — need
-// arguments or a local session, and status and logs are reads.
+// expands itself (core/nodeselector, no shell involved), which every om3 agent
+// runs.
+//
+// updatepkg upgrades the opensvc packages of every node, one node at a time:
+// `om cluster update pkg`, an orchestration of the daemons. Its command starts
+// with `cluster`, which a runner of om3 recent enough runs as `om cluster …`
+// rather than under `om node`; an older one answers with an unknown command,
+// in the result of the action. The command returns once the orchestration is
+// started, without waiting for it: the daemon running the queue restarts during
+// the upgrade.
+//
+// The other cluster commands of om3 — join, leave, enroll, evict, register, ssh
+// trust — need arguments or a local session, and status and logs are reads.
 var clusterActionWords = map[string]string{
-	"freeze": "freeze",
-	"thaw":   "unfreeze",
-	"abort":  "abort",
+	"freeze":    "freeze --node *",
+	"thaw":      "unfreeze --node *",
+	"abort":     "abort --node *",
+	"updatepkg": "cluster update pkg",
 }
 
-// clusterActionCommand is the queued command of a cluster action: the node
-// runner of om3 reads it after `om node`.
+// clusterActionCommand is the queued command of a cluster action.
 func clusterActionCommand(action string) string {
-	return clusterActionWords[action] + " --node *"
+	return clusterActionWords[action]
 }
 
 // queueClusterAction queues an action on a whole cluster: NodeExec privilege and

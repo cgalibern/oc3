@@ -10,6 +10,8 @@ func TestClusterActionCommand(t *testing.T) {
 		"freeze": "freeze --node *",
 		"thaw":   "unfreeze --node *",
 		"abort":  "abort --node *",
+		// The rolling upgrade, run as `om cluster update pkg` by the agent.
+		"updatepkg": "cluster update pkg",
 	} {
 		if got := clusterActionCommand(action); got != want {
 			t.Errorf("%s: got %q, want %q", action, got, want)
