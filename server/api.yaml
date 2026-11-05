@@ -97,8 +97,9 @@ paths:
           for compliance_check and compliance_fix) and responsibility for the node.
         - cluster_id alone: an action on the whole cluster, posted for a node of the
           cluster seen alive in the last 15 minutes and running the om3 agent,
-          which runs it on every node of the cluster (`om node <action> --node *`).
-          Requires the NodeExec privilege and responsibility for every node of the
+          which runs it on every node of the cluster (`om node <action> --node *`),
+          or, for updatepkg, upgrades the opensvc packages of every node, one node
+          at a time (`om cluster update pkg`, an agent recent enough). Requires the NodeExec privilege and responsibility for every node of the
           cluster.
 
         Accepted actions: push resinfo, push config, start, stop, giveback,
@@ -110,8 +111,8 @@ paths:
         checks, sysreport, updatecomp, updatepkg, scanscsi,
         reboot, schedule_reboot, unschedule_reboot, shutdown, drain,
         compliance_check, compliance_fix (on every module attached to the node),
-        freeze and thaw on a node; freeze, thaw and abort (of the running
-        orchestration) on a cluster. Compliance actions on a given module, moduleset
+        freeze and thaw on a node; freeze, thaw, abort (of the running
+        orchestration) and updatepkg on a cluster. Compliance actions on a given module, moduleset
         or ruleset, Wake On LAN, the root password rotation and agent options are
         not supported.
 
