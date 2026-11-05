@@ -713,8 +713,9 @@ func (oDb *DB) PurgeTablesFromObjectID(ctx context.Context, id string) error {
 	)
 
 	var (
+		// service_ids first, see serviceCascadeTables.
 		tables = []string{
-			"services", "svcactions", "drpservices", "svcmon_log", "resmon_log",
+			"service_ids", "services", "svcactions", "drpservices", "svcmon_log", "resmon_log",
 			"svcmon_log_ack", "checks_settings", "comp_log", "comp_log_daily",
 			"comp_rulesets_services", "comp_modulesets_services", "log",
 			"action_queue", "svc_tags", "form_output_results", "svcmon_log_last",
